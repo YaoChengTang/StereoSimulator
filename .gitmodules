@@ -1,0 +1,6 @@
+[submodule "Depth-Anything-V2"]
+    path = Depth-Anything-V2
+    url = git@github.com:DepthAnything/Depth-Anything-V2.git  # 适当修改为正确的 URL
+[submodule "sam2"]
+    path = sam2
+    url = git@github.com:facebookresearch/sam2.git
