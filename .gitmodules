@@ -4,3 +4,6 @@
 [submodule "sam2"]
     path = sam2
     url = git@github.com:facebookresearch/sam2.git
+[submodule "DepthCrafter"]
+    path = DepthCrafter
+    url = git@github.com:Tencent/DepthCrafter.git
