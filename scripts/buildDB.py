@@ -2,8 +2,8 @@
 
 import os
 import csv
-dict_path = '/data4/lzd/iccv25/data/video_sets1'
-csv_file = '/data4/lzd/iccv25/data/video_sets1.csv'
+dict_path = '/data4/lzd/iccv25/data/video_test'
+csv_file = '/data4/lzd/iccv25/data/video_test.csv'
 
 
 List = os.listdir(dict_path)
