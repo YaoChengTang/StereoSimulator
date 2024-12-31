@@ -4,11 +4,23 @@ from PIL import Image
 import numpy as np
 import cv2
 from simple_lama_inpainting import SimpleLama
-from PIL import Image
 
 class ImageProcess():
     def __init__(self):
         self.simple_lama = SimpleLama()
+
+    def morphological_min(self, input_mask, kernel_size=3):
+        input_mask_neg = -input_mask.float() 
+        eroded_mask = -F.max_pool2d(input_mask_neg.unsqueeze(0).unsqueeze(0), kernel_size=kernel_size, stride=1, padding=kernel_size//2)
+        return (eroded_mask > 0).squeeze().int() 
+
+    def morphological_max(self, input_mask, kernel_size=3):
+        dilated_mask = F.max_pool2d(input_mask.unsqueeze(0).unsqueeze(0).float(), kernel_size=kernel_size, stride=1, padding=kernel_size//2)
+        return (dilated_mask > 0).squeeze().int()
+
+    def sum_pooling(self, input_mask, kernel_size=3):
+        summed_mask = F.avg_pool2d(input_mask.unsqueeze(0).unsqueeze(0).float(), kernel_size=kernel_size, stride=1, padding=kernel_size//2) * kernel_size * kernel_size
+        return (summed_mask > (kernel_size * kernel_size // 2)).squeeze().int() 
     def get_occlusion_mask(self, shifted):
 
         mask_up = shifted > 0
@@ -110,10 +122,18 @@ class ImageProcess():
         
         warped_image = warped_image.astype(np.uint8)
         mask_ =  np.zeros((feed_height, process_width), dtype=np.uint8)
-        mask_[warped_image.max(-1) == 0] = 255
+        mask_[warped_image.max(-1) == 0] = 1
+        mask_t = torch.from_numpy(mask_).squeeze()
+        
+        mask_max = self.morphological_max(mask_t)
+        mask_min = self.morphological_min(mask_max)
+        mask_re = self.sum_pooling(mask_min)
+        mask_re = mask_re.numpy() * 255
+        warped_image[mask_re > 0] = 0
         right_image_np = cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB)
+        right_image_np[mask_re > 0] = 0
         right_image = Image.fromarray(right_image_np)
-        mask = Image.fromarray(mask_).convert('L')
+        mask = Image.fromarray(mask_re).convert('L')
         result = self.simple_lama(right_image, mask)
             
         return right_image, result, mask

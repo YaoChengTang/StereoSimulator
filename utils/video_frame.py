@@ -1,6 +1,6 @@
 import cv2
 
-def parser_video(path, readFps = 1):
+def parser_video(path, stride = 1):
     # return frame_list, fps, frame_cnt
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
@@ -12,7 +12,7 @@ def parser_video(path, readFps = 1):
         ret, frame = cap.read()
         if not ret:
             break  
-        if frame_count % readFps == 0:
+        if frame_count % stride == 0:
             frame_list.append(frame)
         frame_count += 1
     fps = cap.get(cv2.CAP_PROP_FPS)
