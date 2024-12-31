@@ -1,6 +1,6 @@
 import cv2
 
-def parser_video(path, stride = 15):
+def parser_video(path, stride = 1):
     # return frame_list, fps, frame_cnt
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
