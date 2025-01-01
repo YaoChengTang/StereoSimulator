@@ -28,7 +28,7 @@ if __name__ == '__main__':
     model = DepthAnythingV2(**model_configs[encoder])
     model.load_state_dict(torch.load(f'checkpoints/depth_anything_v2_{encoder}.pth', map_location='cpu'))
     model = model.to(DEVICE).eval()
-    vpath = '/data4/lzd/iccv25/vis/test_video/1_1.mp4'
+    vpath = '/data2/videos/youtube/video5/Y2metaapp3D_Trick_Art_Hole_On_Line_Paper_Traffic_signs_No_horn_honking.mp4'
     frame_list, fps, frame_count = vf.parser_video(vpath, 15)
     img_process = image_process.ImageProcess()
     # raw_img = cv2.imread('/data4/lzd/datasets/booster/train/balanced/Bedroom/camera_00/im0.png')
@@ -39,16 +39,15 @@ if __name__ == '__main__':
     # os.mkdir('imgR_noFill/' + videoName)
     # os.mkdir('mask/' + videoName)
     # os.mkdir('depth/' + videoName)
+    save_path = os.path.join('/data4/lzd/iccv25/vis/depth_anything/', videoName)
+    os.makedirs(save_path, exist_ok=True)
     for i in tqdm(frame_list):
-        if cnt != 12:
-            cnt += 1
-            continue
         depth = model.infer_image(i) # HxW raw depth map in numpy
         # print(depth)
-        imgR, imgRFill, mask = img_process.project_image(i, depth/4)
+        cv2.imwrite(os.path.join(save_path, f'{cnt}.png'), np.round(depth * 16).astype(np.uint16))
+
+        # imgR, imgRFill, mask = img_process.project_image(i, depth/4)
         # imgRFill.save(f'imgR/{videoName}/{cnt}.png')
-        imgR.save('haha.png')
-        imgRFill.save('haha1.png')
         cnt += 1
         # imgR.save(f'imgR_noFill/{videoName}/{cnt}.png')
         # mask.save(f'mask/{videoName}/{cnt}.png')
