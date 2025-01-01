@@ -57,7 +57,7 @@ def main(
             print(save_path)
             for frame in tqdm(frame_list):
                 depth = model.infer_image(frame)
-                cv2.imwrite(os.path.join(save_path, f'{cnt}.jpg'), np.round(depth * 16).astype(np.uint16))
+                cv2.imwrite(os.path.join(save_path, f'{cnt}.png'), np.round(depth * 16).astype(np.uint16))
                 cnt += 1
             row['depth'] = 1
             with open(csv_path, mode='w', newline='') as file:
