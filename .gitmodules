@@ -3,7 +3,7 @@
     url = git@github.com:DepthAnything/Depth-Anything-V2.git  # 适当修改为正确的 URL
 [submodule "sam2"]
     path = sam2
-    url = git@github.com:BFZD233/samv2.git
+	url = git@github.com:BFZD233/samv2.git
 [submodule "DepthCrafter"]
     path = DepthCrafter
     url = git@github.com:Tencent/DepthCrafter.git
