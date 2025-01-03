@@ -121,18 +121,67 @@ def visualize_ransac(points, inliers, plane_params):
     ax.scatter(outlier_points[:, 0], outlier_points[:, 1], outlier_points[:, 2], 
                c='r', label='Outliers', s=5)
 
-    # 绘制拟合的平面
     x = np.linspace(points[:, 0].min(), points[:, 0].max(), 10)
     y = np.linspace(points[:, 1].min(), points[:, 1].max(), 10)
     x, y = np.meshgrid(x, y)
     z = (-plane_params[0] * x - plane_params[1] * y - plane_params[3]) / plane_params[2]
     ax.plot_surface(x, y, z, color='g', alpha=0.5, label="Fitted Plane")
 
-    # 设置图形属性
-
+    # save Image
     plt.savefig('/data4/lzd/iccv25/vis/haha.png')
 
-# test
+def Process(videoName, frame_id):
+    """
+    Process Mono Image, correct illusion region's depth and filter out noise.
+
+    Pramas:
+        videoName (str): the name of process video。
+        frame_id (int): which frame you want to process。
+
+    Out:
+        processed image(np.array)
+    """
+    mask_small_path = f"/data4/lzd/iccv25/vis/mask/{videoName}/{frame_id}.jpg"
+    mask_large_path = f"/data4/lzd/iccv25/vis/mask/{videoName}/{frame_id}_all.jpg"
+    depth_path = f"/data4/lzd/iccv25/vis/depth_anything/{videoName}/{frame_id}.png"
+    source_path = f"/data4/lzd/iccv25/vis/imgL/{videoName}/{frame_id}.png"
+
+
+    mask_small = load_image(mask_small_path)
+    mask_large = load_image(mask_large_path)
+    source_image = load_image(source_path)
+
+    mask_small = mask_small > 0
+    mask_large = mask_large > 0
+    Z = load_image(depth_path)
+    plt.imsave('/data4/lzd/iccv25/vis/test_post/1_o.png',Z, cmap='jet')
+    coords_2d = np.argwhere(mask_large & ~mask_small)
+    points_xyz = []
+    for (i, j) in coords_2d:
+        x_val = i
+        y_val = j
+        z_val = Z[i, j]
+        points_xyz.append([x_val, y_val, z_val])
+    points_xyz = np.array(points_xyz)  # (N, 3)
+    # return mask_
+    plane_params, inliers = fit_plane_ransac(points_xyz, threshold=1, max_trials=1000)
+    a,b,c,d = plane_params
+
+
+    rows, cols = np.where(mask_small)
+    for (i,j) in zip(rows, cols):
+        Z[i,j] = (-d - (a * i + b * j)) / c
+
+    radius = 8  # Window radius
+    eps = 1e-2  # Regularization parameter
+    filtered_image = guided_filter(Z, source_image, radius, eps)
+    Z[mask_large & ~mask_small] = filtered_image[mask_large & ~mask_small]
+
+    return Z
+
+
+    
+# Test
 if __name__ == '__main__':
     mask_small_path = "/data4/lzd/iccv25/vis/mask/Y2metaapp3D_Trick_Art_Hole_On_Line_Paper_Traffic_signs_No_horn_honking/326.jpg"
     mask_large_path = "/data4/lzd/iccv25/vis/mask/Y2metaapp3D_Trick_Art_Hole_On_Line_Paper_Traffic_signs_No_horn_honking/326_all.jpg"
@@ -154,11 +203,6 @@ if __name__ == '__main__':
         points_xyz.append([x_val, y_val, z_val])
     points_xyz = np.array(points_xyz)  # (N, 3)
     # return mask_
-
-    # a, b, c, d = fit_plane_svd(points_xyz)
-    # print("拟合得到的平面参数 (a, b, c, d) = ", (a, b, c, d))
-    # print(f"平面方程: {a:.3f}x + {b:.3f}y + {c:.3f}z + {d:.3f} = 0")
-
     plane_params, inliers = fit_plane_ransac(points_xyz, threshold=1, max_trials=1000)
     a,b,c,d = plane_params
     print("拟合的平面参数: ax + by + cz + d = 0")
