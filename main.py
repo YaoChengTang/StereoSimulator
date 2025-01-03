@@ -40,22 +40,23 @@ if __name__ == '__main__':
     # os.mkdir('mask/' + videoName)
     # os.mkdir('depth/' + videoName)
     save_path = os.path.join('/data4/lzd/iccv25/vis/depth_anything/', videoName)
+    save_path_L = os.path.join('/data4/lzd/iccv25/vis/imgL/', videoName)
     os.makedirs(save_path, exist_ok=True)
+    os.makedirs(save_path_L, exist_ok=True)
     for i in tqdm(frame_list):
-        depth = model.infer_image(i) # HxW raw depth map in numpy
+        # depth = model.infer_image(i) # HxW raw depth map in numpy
         # print(depth)
-        cv2.imwrite(os.path.join(save_path, f'{cnt}.png'), np.round(depth * 16).astype(np.uint16))
+        # cv2.imwrite(os.path.join(save_path, f'{cnt}.png'), np.round(depth * 16).astype(np.uint16))
 
         # imgR, imgRFill, mask = img_process.project_image(i, depth/4)
         # imgRFill.save(f'imgR/{videoName}/{cnt}.png')
-        cnt += 1
         # imgR.save(f'imgR_noFill/{videoName}/{cnt}.png')
         # mask.save(f'mask/{videoName}/{cnt}.png')
-        # cv2.imwrite(f'imgL/{videoName}/{cnt}.png', i)
+        cv2.imwrite(os.path.join(save_path_L, f'{cnt}.png'), i)
         # # cv2.imwrite(f'mask/{cnt}.png',mask)
         # plt.imsave(f'depth/{videoName}/{cnt}.png', depth/4, cmap='jet')
         # np.save(f'../vis/depth/{videoName}/{cnt}.npy', depth/4)
-        # cnt += 1
+        cnt += 1
         # break
 
 

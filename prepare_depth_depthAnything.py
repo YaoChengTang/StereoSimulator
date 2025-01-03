@@ -45,7 +45,7 @@ def main(
         if row['depth'] == '0':  # depth 为 0 时进行处理
             vpath = os.path.join(folder, row['video_name'])
             try:
-                frame_list, fps, frame_count = vf.parser_video(vpath, 15)
+                frame_list, frame_count = vf.parser_video(vpath, 2)
             except:
                 print('CAN Not Open Video')
                 continue
@@ -55,7 +55,7 @@ def main(
             )
             os.makedirs(save_path, exist_ok=True)
             print(save_path)
-            for frame in tqdm(frame_list):
+            for frame in frame_list:
                 depth = model.infer_image(frame)
                 cv2.imwrite(os.path.join(save_path, f'{cnt}.png'), np.round(depth * 16).astype(np.uint16))
                 cnt += 1

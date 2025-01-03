@@ -7,12 +7,12 @@ LOG_DIR="./logs"
 mkdir -p $LOG_DIR
 
 # 启动并行任务
-for i in {5..6}; do
+for i in {0..3}; do
     # 根据任务索引分配 GPU
     if [[ $i -lt 2 ]]; then
-        GPU_ID=5
+        GPU_ID=6
     else
-        GPU_ID=5
+        GPU_ID=7
     fi
 
     # 启动任务并记录日志

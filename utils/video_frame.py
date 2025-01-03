@@ -1,13 +1,14 @@
 import cv2
 
-def parser_video(path, stride = 1):
+def parser_video(path, fps_exp = 2):
     # return frame_list, fps, frame_cnt
     cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
     if not cap.isOpened():
         print("Can not open the video")
-        exit()
     frame_count = 0
     frame_list = []
+    stride = int(fps / fps_exp)
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -15,9 +16,8 @@ def parser_video(path, stride = 1):
         if frame_count % stride == 0:
             frame_list.append(frame)
         frame_count += 1
-    fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
-    return frame_list, fps, frame_count
+    return frame_list, frame_count
 
 def gen_video(frame_list, path, fps):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
