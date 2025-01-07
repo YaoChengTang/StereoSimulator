@@ -112,11 +112,8 @@
       </form>
     {% endif %}
 
-    <form id="delete-form" method="POST" action="{{ url_for('action') }}">
-      <input type="hidden" name="op" value="delete_selected">
-      <input type="hidden" id="selected_indices" name="selected_indices">
-      <button onclick="deleteSelectedImages()">Delete Selected Images</button>
-    </form>
+    <button onclick="deleteSelectedImages()">Delete Selected Images</button>
+
   </div>
 </body>
 </html>

@@ -162,25 +162,6 @@ def action():
     elif op == 'prev_page':  # 上一页
         if current_page > 0:
             current_page -= 1
-    elif op == 'delete_selected':  # 批量删除选中的图片
-        indices = request.form.getlist('selected_indices')
-        indices = [int(index) for index in indices]
-        indices.sort(reverse=True)
-
-        deleted_files = []
-        for index in indices:
-            if 0 <= index < len(images):
-                filename = images[index]
-                image_path = os.path.join(IMAGE_FOLDER, filename)
-                try:
-                    os.remove(image_path)
-                    deleted_files.append(filename)
-                except OSError as e:
-                    print(f"[ERROR] Failed to delete {filename}: {e}")
-                    continue
-                images.pop(index)
-
-        print(f"[INFO] Deleted images: {deleted_files}")
     return redirect(url_for('index'))
 
 @app.route('/delete', methods=['POST'])
