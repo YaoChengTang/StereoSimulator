@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import cv2
 import glob
@@ -19,6 +20,7 @@ def save_frame(frame, frames_dir, frame_idx):
 def save_frames(frames_root, video_rel_path, frame_list, max_workers=4):
     """Save frames using multiple threads."""
     sub_dir, ext = os.path.splitext(video_rel_path)
+    sub_dir = process_string(sub_dir)
     frames_dir = os.path.join(frames_root, sub_dir)
     os.makedirs(frames_dir, exist_ok=True)
 
@@ -29,6 +31,26 @@ def save_frames(frames_root, video_rel_path, frame_list, max_workers=4):
     
     print(f"save all frames into {frames_dir}")
 
+
+def process_string(input_string):
+    video_name = input_string.split("/")[-1]
+    prefix = input_string.split("/")[0]
+    # Replace all special characters (except '_') with '-'
+    video_name = re.sub(r'[^a-zA-Z0-9_]', '-', video_name)
+
+    # Merge multiple consecutive underscores into one
+    video_name = re.sub(r'_+', '_', video_name)
+
+    # Remove the part before and including the first '_'
+    video_name = video_name.split('_', 1)[-1]
+
+    video_name = re.sub(r'-+', '-', video_name)
+
+    video_name = video_name.replace("Y2metaapp", "").replace("Y2meta.app", "").replace("Y2meta-app", "")
+    video_name = re.sub(r'^[^a-zA-Z0-9]+', '', video_name)
+
+    result = os.path.join(prefix, video_name)
+    return result
 
 
 videos_root = "/data2/Fooling3D/videos"
@@ -52,10 +74,15 @@ max_workers = 10
 # np.save(os.path.join(cache_root, "liu.npy"), video_paths_2)
 # np.save(os.path.join(cache_root, "zeng.npy"), video_paths_3)
 
+
 user = input("input your name (yao, liu, zeng):")
+start_video_idx = input("start from video index:")
+start_video_idx = int(start_video_idx) if start_video_idx else 0
+print(f"Start from {start_video_idx} frame")
+
 video_paths = np.load(os.path.join(cache_root, "{}.npy".format(user)))
 video_paths.sort()
-for video_idx, video_path in enumerate(video_paths):
+for video_idx, video_path in enumerate(video_paths[start_video_idx:]):
     print("\r\n", "-"*10, f"Processing {video_idx}/{len(video_paths)} frame", "-"*10, "\r\n")
     frame_list, frame_count = parser_video(video_path)
     video_rel_path = "/".join(video_path.split("/")[-2:])
