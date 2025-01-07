@@ -27,7 +27,7 @@ def load_images():
         假设文件名格式为 xxx.png，其中 xxx 是整数
         """
         try:
-            return int(os.path.splitext(filename)[0])  # 提取文件名（去掉扩展名）并转换为整数
+            return int(os.path.splitext(filename)[0][6:])  # 提取文件名（去掉扩展名）并转换为整数
         except ValueError:
             return float('inf')  # 如果无法转换为整数，放在最后
 
