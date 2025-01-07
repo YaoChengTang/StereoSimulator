@@ -200,8 +200,8 @@ def delete_page():
     global current_image_index, start_idx
     deleted_files = []
     for index in range(10):
-        if 0 <= index + start_idx < len(images):
-            filename = images[index + start_idx]
+        if 0 <= start_idx < len(images):
+            filename = images[start_idx]
             image_path = os.path.join(IMAGE_FOLDER, filename)
             try:
                 os.remove(image_path)
@@ -210,7 +210,7 @@ def delete_page():
                 print(f"[ERROR] Failed to delete {filename}: {e}")
                 continue
 
-            images.pop(index + start_idx)  # 从列表中移除
+            images.pop(start_idx)  # 从列表中移除
     return jsonify({"deleted": deleted_files})
 if __name__ == '__main__':
     # 默认路径为空，用户可以通过输入框设置
