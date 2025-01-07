@@ -41,7 +41,7 @@ def load_images_from_folder(folder_path):
         从文件名中提取整数部分用于排序
         """
         try:
-            return int(os.path.splitext(filename)[0][6:])  # 提取文件名（去掉扩展名）并转换为整数
+            return int(os.path.splitext(filename)[0].split('frame_')[1])  # 提取文件名（去掉扩展名）并转换为整数
         except ValueError:
             return float('inf')  # 如果无法转换为整数，放在最后
 
