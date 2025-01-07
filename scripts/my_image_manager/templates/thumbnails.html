@@ -2,11 +2,12 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Thumbnails</title>
+  <title>{{ title }}</title>
   <style>
     body {
       font-family: sans-serif;
       margin: 20px;
+      user-select: none; /* 禁止用户选中文本 */
     }
     .thumbnail {
       display: inline-block;
@@ -18,19 +19,25 @@
       width: 250px;
       height: auto;
       border: 2px solid transparent;
+      transition: transform 0.2s ease, box-shadow 0.2s ease; /* 添加平滑过渡效果 */
     }
+
     img.selected {
       border-color: red;
+      border-width: 4px; /* 加粗边框 */
+      box-shadow: 0 0 10px rgba(255, 0, 0, 0.8); /* 添加红色发光效果 */
+      transform: scale(1.1); /* 略微放大图片 */
+      background-color: rgba(255, 0, 0, 0.1); /* 添加轻微的红色背景遮罩 */
     }
     form {
       margin-bottom: 20px;
     }
     .nav {
-    margin-top: 20px;
-    display: flex; /* 启用 Flexbox 布局 */
-    justify-content: space-between; /* 按钮两端对齐 */
-    align-items: center; /* 垂直居中 */
-  }
+      margin-top: 20px;
+      display: flex; /* 启用 Flexbox 布局 */
+      justify-content: space-between; /* 按钮两端对齐 */
+      align-items: center; /* 垂直居中 */
+    }
 
     button {
       padding: 10px 20px;
@@ -59,30 +66,155 @@
     button.delete-page:hover {
       background-color: #388E3C; /* 深绿 */
     }
+
+    #selection-box {
+      position: absolute;
+      border: 2px dashed #007BFF;
+      background-color: rgba(0, 123, 255, 0.2);
+      display: none;
+      pointer-events: none; /* 禁止鼠标事件 */
+    }
   </style>
-  
+</head>
+<body>
+  <h1>Thumbnails (Page {{ start_idx }} / {{ total_pages }})</h1>
+
+  <form method="POST" action="{{ url_for('index') }}">
+    <label for="image_folder">Set Image Folder:</label>
+    <input type="text" id="image_folder" name="image_folder" value="{{ image_folder }}" placeholder="Enter folder path">
+    <button type="submit">Change Folder</button>
+  </form>
+
+  <div id="thumbnails">
+    {% for thumbnail in thumbnails %}
+      <div class="thumbnail">
+        <!-- 左键点击查看详情 -->
+        <a href="{{ url_for('view_image', image_index=(start_idx + loop.index0)) }}">
+          <img 
+            src="{{ url_for('serve_compressed_image', image_index=(start_idx + loop.index0)) }}" 
+            alt="Thumbnail"
+            data-index="{{ start_idx + loop.index0 }}"
+          >
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="nav">
+    {% if has_next_page %}
+      <form method="POST" action="{{ url_for('action') }}">
+        <input type="hidden" name="op" value="prev_page">
+        <button type="submit">Prev Page</button>
+      </form>
+      <form method="POST" action="{{ url_for('action') }}">
+        <input type="hidden" name="op" value="next_page">
+        <button type="submit">Next Page</button>
+      </form>
+    {% endif %}
+
+    <!-- 删除选中图片按钮 -->
+    <button class="delete-selected" onclick="deleteSelectedImages()">Delete Selected Images</button>
+    
+    <!-- 删除当前页图片按钮 -->
+    <button class="delete-page" onclick="deletePage()">Delete This Page</button>
+  </div>
+
+  <!-- 选择框 -->
+  <div id="selection-box"></div>
+
   <script>
-    // 用于处理选中状态和批量删除
-    document.addEventListener("contextmenu", function(event) {
-      event.preventDefault(); // 阻止默认右键菜单
-    });
+    let permanentlySelected = new Set(); // 固定选中的图片
     let selectedImages = new Set();
+    let isDragging = false;
+    let startX, startY;
 
-    function toggleSelection(index, element) {
-      if (selectedImages.has(index)) {
-        selectedImages.delete(index);
-        element.classList.remove("selected");
-      } else {
-        selectedImages.add(index);
-        element.classList.add("selected");
+    const selectionBox = document.getElementById("selection-box");
+    const thumbnails = document.querySelectorAll("#thumbnails img");
+
+    // 禁用默认右键菜单
+    document.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+    });
+
+    // 开始框选
+    document.addEventListener("mousedown", (event) => {
+      if (event.button === 2) { // 右键按下
+        event.preventDefault();
+        isDragging = true;
+        permanentlySelected.clear();
+        // 初始化选择框位置
+        startX = event.pageX;
+        startY = event.pageY;
+        selectionBox.style.left = `${startX}px`;
+        selectionBox.style.top = `${startY}px`;
+        selectionBox.style.width = "0px";
+        selectionBox.style.height = "0px"
+        selectionBox.style.display = "block";
       }
-    }
+    });
 
-    function rightClickSelect(event, index, element) {
-      event.preventDefault(); // 阻止默认的右键菜单
-      toggleSelection(index, element); // 切换选中状态
-    }
+    // 更新选择框
+    document.addEventListener("mousemove", (event) => {
+      if (isDragging) {
+        const currentX = event.pageX;
+        const currentY = event.pageY;
 
+        // 计算选择框的尺寸和位置
+        const width = Math.abs(currentX - startX);
+        const height = Math.abs(currentY - startY);
+        const left = Math.min(startX, currentX);
+        const top = Math.min(startY, currentY);
+
+        selectionBox.style.left = `${left}px`;
+        selectionBox.style.top = `${top}px`;
+        selectionBox.style.width = `${width}px`;
+        selectionBox.style.height = `${height}px`;
+
+        // 检查选择框覆盖的图片
+        thumbnails.forEach((thumbnail) => {
+          const rect = thumbnail.getBoundingClientRect();
+          const thumbnailLeft = rect.left + window.scrollX;
+          const thumbnailTop = rect.top + window.scrollY;
+          const thumbnailRight = rect.right + window.scrollX;
+          const thumbnailBottom = rect.bottom + window.scrollY;
+
+          // 检测图片是否在选择框内
+          if (
+            thumbnailLeft < left + width &&
+            thumbnailRight > left &&
+            thumbnailTop < top + height &&
+            thumbnailBottom > top
+          ) {
+            thumbnail.classList.add("pre_selected");
+          } else {
+            thumbnail.classList.remove("pre_selected");
+          }
+        });
+      }
+    });
+
+    // 结束框选
+    document.addEventListener("mouseup", (event) => {
+      if (isDragging && event.button === 2) { // 右键释放
+        isDragging = false;
+        selectionBox.style.display = "none"; // 隐藏选择框
+
+        thumbnails.forEach((thumbnail) => {
+          if (thumbnail.classList.contains("pre_selected")) {
+            const index = thumbnail.dataset.index;
+            if (selectedImages.has(index)) {
+              selectedImages.delete(index);
+              thumbnail.classList.remove("selected");
+            } else {
+              selectedImages.add(index);
+              thumbnail.classList.add("selected");
+            }
+          }
+        });
+      }
+    });
+
+    // 删除选中图片
     function deleteSelectedImages() {
       if (selectedImages.size === 0) {
         alert("No images selected!");
@@ -105,70 +237,25 @@
         })
         .catch(error => console.error("Error deleting images:", error));
     }
-  </script>
 
-  <script>
+    // 删除当前页的图片
     function deletePage() {
-
-        if (!confirm("Are you sure you want to delete the selected images?")) {
+      if (!confirm("Are you sure you want to delete the selected images?")) {
         return;
-        }
-        fetch("/delete_page", {
+      }
+      fetch("/delete_page", {
         method: "POST",
         headers: {
-            "Content-Type": "application/json"
+          "Content-Type": "application/json"
         },
-        })
+      })
         .then(response => response.json())
         .then(data => {
-            alert(`Deleted images: ${data.deleted.join(", ")}`);
-            location.reload();
+          alert(`Deleted images: ${data.deleted.join(", ")}`);
+          location.reload();
         })
         .catch(error => console.error("Error deleting images:", error));
     }
-    </script>
-</head>
-<body>
-  <h1>Thumbnails (Page {{ start_idx }} / {{ total_pages }})</h1>
-
-  <form method="POST" action="{{ url_for('index') }}">
-    <label for="image_folder">Set Image Folder:</label>
-    <input type="text" id="image_folder" name="image_folder" value="{{ image_folder }}" placeholder="Enter folder path">
-    <button type="submit">Change Folder</button>
-  </form>
-
-  <div>
-    {% for thumbnail in thumbnails %}
-      <div class="thumbnail">
-        <!-- 左键点击查看详情 -->
-        <a href="{{ url_for('view_image', image_index=(start_idx + loop.index0)) }}">
-          <img 
-            src="{{ url_for('serve_compressed_image', image_index=(start_idx + loop.index0)) }}" 
-            alt="Thumbnail"
-            oncontextmenu="rightClickSelect(event, {{ start_idx + loop.index0 }}, this)"  <!-- 右键选中 -->
-          > 
-        </a>
-      </div>
-    {% endfor %}
-  </div>
-
-  <div class="nav">
-    {% if has_next_page %}
-    <form method="POST" action="{{ url_for('action') }}">
-      <input type="hidden" name="op" value="prev_page">
-      <button type="submit">Prev Page</button>
-    </form>
-      <form method="POST" action="{{ url_for('action') }}">
-        <input type="hidden" name="op" value="next_page">
-        <button type="submit">Next Page</button>
-      </form>
-    {% endif %}
-
-    <!-- 删除选中图片按钮 -->
-    <button class="delete-selected" onclick="deleteSelectedImages()">Delete Selected Images</button>
-    
-    <!-- 删除当前页图片按钮 -->
-    <button class="delete-page" onclick="deletePage()">Delete This Page</button>
-  </div>
+  </script>
 </body>
 </html>

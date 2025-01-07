@@ -211,6 +211,7 @@ def delete_images():
         return jsonify({"error": "Invalid folder"}), 400
 
     indices = request.json.get('indices', [])
+    indices = [int(_) for _ in indices]
     deleted_files = []
 
     for index in sorted(indices, reverse=True):
@@ -226,7 +227,7 @@ def delete_images():
 
             images.pop(index)  # 从列表中移除
     start_idx += images_per_page - len(deleted_files)
-    print(start_idx)
+    redirect(url_for('index'))
     return jsonify({"deleted": deleted_files})
 
 @app.route('/delete_page', methods=['POST'])
