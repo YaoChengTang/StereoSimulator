@@ -33,7 +33,7 @@ def main(
     folder = f'/data2/videos/youtube/video{idx}'
     video_list = os.listdir(folder)
     video_paths = [os.path.join(folder, i) for i in video_list]
-    csv_path = folder + ".csv"
+    csv_path = f'/data2/videos/meta_data/video{idx}.csv'
     with open(csv_path, mode='r', newline='') as infile:
         reader = csv.DictReader(infile)
         fieldnames = reader.fieldnames
