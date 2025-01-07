@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, render_template, redirect, url_for
+from flask import Flask, request, send_file, render_template, redirect, url_for, jsonify
 import os
 import sys
 
@@ -39,7 +39,7 @@ def load_images_from_folder(folder_path):
         从文件名中提取整数部分用于排序
         """
         try:
-            return int(os.path.splitext(filename)[0])  # 提取文件名（去掉扩展名）并转换为整数
+            return int(os.path.splitext(filename)[0][7:])  # 提取文件名（去掉扩展名）并转换为整数
         except ValueError:
             return float('inf')  # 如果无法转换为整数，放在最后
 
@@ -158,9 +158,55 @@ def action():
         # 下 10 张
         if (current_page + 1) * images_per_page < len(images):
             current_page += 1
+    elif op == 'prev_page':  # 上一页
+        if current_page > 0:
+            current_page -= 1
+    elif op == 'delete_selected':  # 批量删除选中的图片
+        indices = request.form.getlist('selected_indices')
+        indices = [int(index) for index in indices]
+        indices.sort(reverse=True)
 
+        deleted_files = []
+        for index in indices:
+            if 0 <= index < len(images):
+                filename = images[index]
+                image_path = os.path.join(IMAGE_FOLDER, filename)
+                try:
+                    os.remove(image_path)
+                    deleted_files.append(filename)
+                except OSError as e:
+                    print(f"[ERROR] Failed to delete {filename}: {e}")
+                    continue
+                images.pop(index)
+
+        print(f"[INFO] Deleted images: {deleted_files}")
     return redirect(url_for('index'))
 
+@app.route('/delete', methods=['POST'])
+def delete_images():
+    """
+    批量删除选中的图片
+    """
+    if not IMAGE_FOLDER:
+        return jsonify({"error": "Invalid folder"}), 400
+
+    indices = request.json.get('indices', [])
+    deleted_files = []
+
+    for index in sorted(indices, reverse=True):
+        if 0 <= index < len(images):
+            filename = images[index]
+            image_path = os.path.join(IMAGE_FOLDER, filename)
+            try:
+                os.remove(image_path)
+                deleted_files.append(filename)
+            except OSError as e:
+                print(f"[ERROR] Failed to delete {filename}: {e}")
+                continue
+
+            images.pop(index)  # 从列表中移除
+
+    return jsonify({"deleted": deleted_files})
 
 if __name__ == '__main__':
     # 默认路径为空，用户可以通过输入框设置

@@ -12,12 +12,15 @@
       display: inline-block;
       margin: 10px;
       text-align: center;
+      cursor: pointer;
     }
     img {
-      width: 150px;
+      width: 250px;
       height: auto;
-      border: 1px solid #ccc;
-      display: block;
+      border: 2px solid transparent;
+    }
+    img.selected {
+      border-color: red;
     }
     .nav {
       margin-top: 20px;
@@ -26,7 +29,52 @@
       padding: 10px 20px;
       cursor: pointer;
     }
+    form {
+      margin-bottom: 20px;
+    }
   </style>
+  <script>
+    // 用于处理选中状态和批量删除
+    let selectedImages = new Set();
+
+    function toggleSelection(index, element) {
+      if (selectedImages.has(index)) {
+        selectedImages.delete(index);
+        element.classList.remove("selected");
+      } else {
+        selectedImages.add(index);
+        element.classList.add("selected");
+      }
+    }
+
+    function rightClickSelect(event, index, element) {
+      event.preventDefault(); // 阻止默认的右键菜单
+      toggleSelection(index, element); // 切换选中状态
+    }
+
+    function deleteSelectedImages() {
+      if (selectedImages.size === 0) {
+        alert("No images selected!");
+        return;
+      }
+      if (!confirm("Are you sure you want to delete the selected images?")) {
+        return;
+      }
+      fetch("/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ indices: Array.from(selectedImages) })
+      })
+        .then(response => response.json())
+        .then(data => {
+          alert(`Deleted images: ${data.deleted.join(", ")}`);
+          location.reload();
+        })
+        .catch(error => console.error("Error deleting images:", error));
+    }
+  </script>
 </head>
 <body>
   <h1>Thumbnails (Page {{ current_page+1 }} / {{ total_pages }})</h1>
@@ -36,22 +84,39 @@
     <input type="text" id="image_folder" name="image_folder" value="{{ image_folder }}" placeholder="Enter folder path">
     <button type="submit">Change Folder</button>
   </form>
-  
+
   <div>
     {% for thumbnail in thumbnails %}
       <div class="thumbnail">
+        <!-- 左键点击查看详情 -->
         <a href="{{ url_for('view_image', image_index=(current_page * 10 + loop.index0)) }}">
-          <img src="{{ url_for('serve_image', image_index=(current_page * 10 + loop.index0)) }}" alt="Thumbnail">
+          <img 
+            src="{{ url_for('serve_image', image_index=(current_page * 10 + loop.index0)) }}" 
+            alt="Thumbnail"
+            oncontextmenu="rightClickSelect(event, {{ current_page * 10 + loop.index0 }}, this)"  <!-- 右键选中 -->
+          > 
         </a>
       </div>
     {% endfor %}
   </div>
+
   <div class="nav">
     {% if has_next_page %}
-      <form action="{{ url_for('action') }}" method="post">
-        <button type="submit" name="op" value="next_page">Next 10 Images</button>
+      <form method="POST" action="{{ url_for('action') }}">
+        <input type="hidden" name="op" value="next_page">
+        <button type="submit">Next 10 Images</button>
+      </form>
+      <form method="POST" action="{{ url_for('action') }}">
+        <input type="hidden" name="op" value="prev_page">
+        <button type="submit">Prev 10 Images</button>
       </form>
     {% endif %}
+
+    <form id="delete-form" method="POST" action="{{ url_for('action') }}">
+      <input type="hidden" name="op" value="delete_selected">
+      <input type="hidden" id="selected_indices" name="selected_indices">
+      <button onclick="deleteSelectedImages()">Delete Selected Images</button>
+    </form>
   </div>
 </body>
 </html>
