@@ -84,7 +84,8 @@ def index():
                            thumbnails=thumbnails,
                            start_idx=start_idx,
                            total_pages=len(images),
-                           has_next_page=has_next_page)
+                           has_next_page=has_next_page,
+                           title=IMAGE_FOLDER.split('/')[-1])
 
 
 
