@@ -1,6 +1,7 @@
 from flask import Flask, request, send_file, render_template, redirect, url_for, jsonify
 import os
 import sys
+import argparse
 
 app = Flask(__name__)
 
@@ -212,8 +213,29 @@ if __name__ == '__main__':
     # 默认路径为空，用户可以通过输入框设置
     IMAGE_FOLDER = None
 
-    if len(sys.argv) == 2:
-        IMAGE_FOLDER = sys.argv[1]
+    # if len(sys.argv) == 2:
+    #     IMAGE_FOLDER = sys.argv[1]
+
+    # 创建 ArgumentParser 对象
+    parser = argparse.ArgumentParser(description="A script that accepts folder and port as input arguments")
+    parser.add_argument(
+        '-f', '--folder', 
+        type=str, 
+        default="./",
+        help='Path to the folder'
+    )
+    parser.add_argument(
+        '-p', '--port', 
+        type=int, 
+        required=True,  # port 是必需的
+        help='Port number for the application'
+    )
+    args = parser.parse_args()
+    
+    IMAGE_FOLDER = args.folder
+    PORT = args.port
+    print(f"Folder path: {IMAGE_FOLDER}")
+    print(f"Port number: {PORT}")
 
     print("[INFO] Starting Flask server...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=PORT, debug=True)
