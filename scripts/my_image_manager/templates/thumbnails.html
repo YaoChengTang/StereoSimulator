@@ -30,6 +30,13 @@
 </head>
 <body>
   <h1>Thumbnails (Page {{ current_page+1 }} / {{ total_pages }})</h1>
+
+  <form method="POST" action="{{ url_for('index') }}">
+    <label for="image_folder">Set Image Folder:</label>
+    <input type="text" id="image_folder" name="image_folder" value="{{ image_folder }}" placeholder="Enter folder path">
+    <button type="submit">Change Folder</button>
+  </form>
+  
   <div>
     {% for thumbnail in thumbnails %}
       <div class="thumbnail">
