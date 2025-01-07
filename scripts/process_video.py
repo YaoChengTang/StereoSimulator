@@ -83,7 +83,7 @@ print(f"Start from {start_video_idx} frame")
 video_paths = np.load(os.path.join(cache_root, "{}.npy".format(user)))
 video_paths.sort()
 for video_idx, video_path in enumerate(video_paths[start_video_idx:]):
-    print("\r\n", "-"*10, f"Processing {video_idx}/{len(video_paths)} frame", "-"*10, "\r\n")
+    print("\r\n", "-"*10, f"Processing {video_idx+start_video_idx}/{len(video_paths)} frame", "-"*10, "\r\n")
     frame_list, frame_count = parser_video(video_path)
     video_rel_path = "/".join(video_path.split("/")[-2:])
     print(f"raw video path: {video_path}")
