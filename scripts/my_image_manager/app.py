@@ -114,6 +114,17 @@ def serve_compressed_image(image_index):
 
     try:
         with Image.open(original_image_path) as img:
+            max_width = 250
+            # Get original dimensions
+            original_width, original_height = img.size
+            
+            # Calculate new dimensions while maintaining the aspect ratio
+            if original_width > max_width:
+                ratio = max_width / float(original_width)
+                new_width = max_width
+                new_height = int(original_height * ratio)
+                img = img.resize((new_width, new_height))
+
             # 创建内存中的字节流
             img_io = BytesIO()
             img.save(img_io, "JPEG", quality=30)  # 动态压缩图像质量到 30
