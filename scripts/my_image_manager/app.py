@@ -9,6 +9,7 @@ app = Flask(__name__)
 IMAGE_FOLDER = None
 images = []
 current_page = 0  # 当前缩略图页面
+start_idx = 0
 images_per_page = 10  # 每页显示的图片数量
 current_image_index = 0  # 当前查看的图片索引
 
@@ -57,20 +58,20 @@ def index():
     """
     显示缩略图页面并提供更改文件夹的功能
     """
-    global current_page, IMAGE_FOLDER
+    global start_idx, IMAGE_FOLDER
 
     # 如果是提交表单（更改文件夹路径）
     if request.method == 'POST':
         new_folder = request.form.get('image_folder')
         if new_folder:
             IMAGE_FOLDER = new_folder.strip()
-            current_page = 0  # 重置分页
+            start_idx = 0  # 重置分页
             load_images_from_folder(IMAGE_FOLDER)
 
 
     # 计算当前页的图片范围
-    start = current_page * images_per_page
-    end = start + images_per_page
+    start = start_idx
+    end = start_idx + images_per_page
     thumbnails = images[start:end]
 
     # 判断是否有下一页
@@ -78,8 +79,8 @@ def index():
 
     return render_template('thumbnails.html',
                            thumbnails=thumbnails,
-                           current_page=current_page,
-                           total_pages=(len(images) - 1) // images_per_page + 1,
+                           start_idx=start_idx,
+                           total_pages=len(images),
                            has_next_page=has_next_page)
 
 
@@ -122,7 +123,7 @@ def action():
     """
     处理表单提交的操作：保留、删除、下一张、上一张、下10张
     """
-    global current_image_index, current_page
+    global current_image_index, start_idx
 
     op = request.form.get('op')
     if op == 'delete':
@@ -157,11 +158,13 @@ def action():
 
     elif op == 'next_page':
         # 下 10 张
-        if (current_page + 1) * images_per_page < len(images):
-            current_page += 1
+        if start_idx + images_per_page + 10 < len(images):
+            start_idx += 10
     elif op == 'prev_page':  # 上一页
-        if current_page > 0:
-            current_page -= 1
+        if start_idx > 10:
+            start_idx -= 10
+        else:
+            start_idx = 0
     return redirect(url_for('index'))
 
 @app.route('/delete', methods=['POST'])
@@ -169,6 +172,7 @@ def delete_images():
     """
     批量删除选中的图片
     """
+    global current_image_index, start_idx
     if not IMAGE_FOLDER:
         return jsonify({"error": "Invalid folder"}), 400
 
@@ -187,9 +191,27 @@ def delete_images():
                 continue
 
             images.pop(index)  # 从列表中移除
-
+    start_idx += 10 - len(deleted_files)
+    print(start_idx)
     return jsonify({"deleted": deleted_files})
 
+@app.route('/delete_page', methods=['POST'])
+def delete_page():
+    global current_image_index, start_idx
+    deleted_files = []
+    for index in range(10):
+        if 0 <= index + start_idx < len(images):
+            filename = images[index + start_idx]
+            image_path = os.path.join(IMAGE_FOLDER, filename)
+            try:
+                os.remove(image_path)
+                deleted_files.append(filename)
+            except OSError as e:
+                print(f"[ERROR] Failed to delete {filename}: {e}")
+                continue
+
+            images.pop(index + start_idx)  # 从列表中移除
+    return jsonify({"deleted": deleted_files})
 if __name__ == '__main__':
     # 默认路径为空，用户可以通过输入框设置
     IMAGE_FOLDER = None

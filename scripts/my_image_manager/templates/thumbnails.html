@@ -25,12 +25,30 @@
     .nav {
       margin-top: 20px;
     }
+    form {
+      margin-bottom: 20px;
+    }
     button {
       padding: 10px 20px;
       cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      font-size: 16px;
     }
-    form {
-      margin-bottom: 20px;
+    button.delete-selected {
+      background-color: #f44336; /* 红色 */
+      color: white;
+      margin-right: 10px; /* 按钮间距 */
+    }
+    button.delete-selected:hover {
+      background-color: #d32f2f; /* 深红 */
+    }
+    button.delete-page {
+      background-color: #4CAF50; /* 绿色 */
+      color: white;
+    }
+    button.delete-page:hover {
+      background-color: #388E3C; /* 深绿 */
     }
   </style>
   <script>
@@ -75,9 +93,30 @@
         .catch(error => console.error("Error deleting images:", error));
     }
   </script>
+
+  <script>
+    function deletePage() {
+
+        if (!confirm("Are you sure you want to delete the selected images?")) {
+        return;
+        }
+        fetch("/delete_page", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Deleted images: ${data.deleted.join(", ")}`);
+            location.reload();
+        })
+        .catch(error => console.error("Error deleting images:", error));
+    }
+    </script>
 </head>
 <body>
-  <h1>Thumbnails (Page {{ current_page+1 }} / {{ total_pages }})</h1>
+  <h1>Thumbnails (Page {{ start_idx }} / {{ total_pages }})</h1>
 
   <form method="POST" action="{{ url_for('index') }}">
     <label for="image_folder">Set Image Folder:</label>
@@ -89,11 +128,11 @@
     {% for thumbnail in thumbnails %}
       <div class="thumbnail">
         <!-- 左键点击查看详情 -->
-        <a href="{{ url_for('view_image', image_index=(current_page * 10 + loop.index0)) }}">
+        <a href="{{ url_for('view_image', image_index=(start_idx + loop.index0)) }}">
           <img 
-            src="{{ url_for('serve_image', image_index=(current_page * 10 + loop.index0)) }}" 
+            src="{{ url_for('serve_image', image_index=(start_idx + loop.index0)) }}" 
             alt="Thumbnail"
-            oncontextmenu="rightClickSelect(event, {{ current_page * 10 + loop.index0 }}, this)"  <!-- 右键选中 -->
+            oncontextmenu="rightClickSelect(event, {{ start_idx + loop.index0 }}, this)"  <!-- 右键选中 -->
           > 
         </a>
       </div>
@@ -112,8 +151,11 @@
       </form>
     {% endif %}
 
-    <button onclick="deleteSelectedImages()">Delete Selected Images</button>
-
+    <!-- 删除选中图片按钮 -->
+    <button class="delete-selected" onclick="deleteSelectedImages()">Delete Selected Images</button>
+    
+    <!-- 删除当前页图片按钮 -->
+    <button class="delete-page" onclick="deletePage()">Delete 10 Images</button>
   </div>
 </body>
 </html>
