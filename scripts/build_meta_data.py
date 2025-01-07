@@ -78,10 +78,10 @@ def process_video_callback(result):
 
 
 if __name__ == "__main__":
-    videos_root = "/data2/videos/youtube"
-    frames_root = "/data2/Fooling3D/video_sequence"
-    csv_path = "/data2/videos/meta_data/video_metadata.csv"
-    failed_csv_path = "/data2/videos/meta_data/failed_videos.csv"
+    videos_root = "/data2/Fooling3D/videos"
+    frames_root = "/data2/Fooling3D/video_frame_sequence"
+    csv_path = "/data2/Fooling3D/meta_data/video_metadata.csv"
+    failed_csv_path = "/data2/Fooling3D/meta_data/failed_videos.csv"
     video_extensions = ['*.mp4', '*.avi', '*.mov', '*.mkv']
     max_workers = 10
 
