@@ -2,6 +2,9 @@ from flask import Flask, request, send_file, render_template, redirect, url_for,
 import os
 import sys
 import argparse
+from PIL import Image
+from io import BytesIO
+from flask import Flask, send_file
 
 app = Flask(__name__)
 
@@ -98,7 +101,27 @@ def serve_image(image_index):
         return send_file(image_path)
     except FileNotFoundError:
         return "Image not found.", 404
+    
+@app.route('/compressed_image/<int:image_index>')
+def serve_compressed_image(image_index):
+    """
+    动态生成并返回低质量的图片
+    """
+    if IMAGE_FOLDER is None or image_index < 0 or image_index >= len(images):
+        return "Image index out of range.", 404
 
+    original_image_path = os.path.join(IMAGE_FOLDER, images[image_index])
+
+    try:
+        with Image.open(original_image_path) as img:
+            # 创建内存中的字节流
+            img_io = BytesIO()
+            img.save(img_io, "JPEG", quality=30)  # 动态压缩图像质量到 30
+            img_io.seek(0)
+            return send_file(img_io, mimetype="image/jpeg")
+    except Exception as e:
+        print(f"[ERROR] Failed to generate compressed image: {e}")
+        return "Error generating image.", 500
 
 @app.route('/view/<int:image_index>')
 def view_image(image_index):

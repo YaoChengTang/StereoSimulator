@@ -130,7 +130,7 @@
         <!-- 左键点击查看详情 -->
         <a href="{{ url_for('view_image', image_index=(start_idx + loop.index0)) }}">
           <img 
-            src="{{ url_for('serve_image', image_index=(start_idx + loop.index0)) }}" 
+            src="{{ url_for('serve_compressed_image', image_index=(start_idx + loop.index0)) }}" 
             alt="Thumbnail"
             oncontextmenu="rightClickSelect(event, {{ start_idx + loop.index0 }}, this)"  <!-- 右键选中 -->
           > 
