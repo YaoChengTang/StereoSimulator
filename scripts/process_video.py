@@ -4,6 +4,7 @@ import cv2
 import glob
 import pandas as pd
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.video_frame import parser_video
@@ -19,13 +20,14 @@ def save_frames(frames_root, video_rel_path, frame_list, max_workers=4):
     """Save frames using multiple threads."""
     sub_dir, ext = os.path.splitext(video_rel_path)
     frames_dir = os.path.join(frames_root, sub_dir)
-    # os.makedirs(frames_dir, exist_ok=True)
-    print(f"save all frames into {frames_dir}")
+    os.makedirs(frames_dir, exist_ok=True)
 
-    # # Save frames using multiple threads
-    # with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    #     for frame_idx, frame in enumerate(frame_list):
-    #         executor.submit(save_frame, frame, frames_dir, frame_idx)
+    # Save frames using multiple threads
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for frame_idx, frame in enumerate(frame_list):
+            executor.submit(save_frame, frame, frames_dir, frame_idx)
+    
+    print(f"save all frames into {frames_dir}")
 
 
 
