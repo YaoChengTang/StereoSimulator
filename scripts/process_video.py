@@ -52,6 +52,7 @@ max_workers = 10
 
 user = input("input your name (yao, liu, zeng):")
 video_paths = np.load(os.path.join(cache_root, "{}.npy".format(user)))
+video_paths.sort()
 for video_idx, video_path in enumerate(video_paths):
     print("\r\n", "-"*10, f"Processing {video_idx}/{len(video_paths)} frame", "-"*10, "\r\n")
     frame_list, frame_count = parser_video(video_path)
