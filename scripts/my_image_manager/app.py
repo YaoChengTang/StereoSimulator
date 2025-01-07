@@ -4,10 +4,13 @@ import sys
 
 app = Flask(__name__)
 
-# 全局变量：指定的图片路径、图片列表、当前图片索引
+# 全局变量：指定的图片路径、图片列表、分页控制变量
 IMAGE_FOLDER = None
 images = []
-current_image_index = 0
+current_page = 0  # 当前缩略图页面
+images_per_page = 10  # 每页显示的图片数量
+current_image_index = 0  # 当前查看的图片索引
+
 
 @app.before_first_request
 def load_images():
@@ -27,7 +30,7 @@ def load_images():
         假设文件名格式为 xxx.png，其中 xxx 是整数
         """
         try:
-            return int(os.path.splitext(filename)[0][6:])  # 提取文件名（去掉扩展名）并转换为整数
+            return int(os.path.splitext(filename)[0])  # 提取文件名（去掉扩展名）并转换为整数
         except ValueError:
             return float('inf')  # 如果无法转换为整数，放在最后
 
@@ -38,27 +41,31 @@ def load_images():
     images.sort(key=extract_int)  # 按整数部分排序
     print(f"[INFO] Loaded {len(images)} images from {IMAGE_FOLDER}")
 
+
 @app.route('/')
 def index():
     """
-    显示当前图片，并提供操作按钮
+    显示缩略图页面
     """
-    global current_image_index
+    global current_page
 
     # 如果没有图片文件
     if not images:
         return "No images found in the specified folder."
 
-    # 防止索引越界
-    current_image_index = max(0, min(current_image_index, len(images) - 1))
+    # 计算当前页的图片范围
+    start = current_page * images_per_page
+    end = start + images_per_page
+    thumbnails = images[start:end]
 
-    # 获取当前图片文件名
-    current_image = images[current_image_index]
+    # 判断是否有下一页
+    has_next_page = end < len(images)
 
-    return render_template('viewer.html',
-                           total=len(images),
-                           index=current_image_index,
-                           filename=current_image)
+    return render_template('thumbnails.html',
+                           thumbnails=thumbnails,
+                           current_page=current_page,
+                           total_pages=(len(images) - 1) // images_per_page + 1,
+                           has_next_page=has_next_page)
 
 
 @app.route('/image/<int:image_index>')
@@ -76,12 +83,30 @@ def serve_image(image_index):
         return "Image not found.", 404
 
 
+@app.route('/view/<int:image_index>')
+def view_image(image_index):
+    """
+    显示单张图片的详情页
+    """
+    global current_image_index
+    current_image_index = image_index  # 更新当前查看的图片索引
+
+    if image_index < 0 or image_index >= len(images):
+        return "Image index out of range.", 404
+
+    current_image = images[image_index]
+    return render_template('viewer.html',
+                           total=len(images),
+                           index=image_index,
+                           filename=current_image)
+
+
 @app.route('/action', methods=['POST'])
 def action():
     """
-    处理表单提交的操作：保留、删除、下一张、上一张
+    处理表单提交的操作：保留、删除、下一张、上一张、下10张
     """
-    global current_image_index
+    global current_image_index, current_page
 
     op = request.form.get('op')
     if op == 'delete':
@@ -113,6 +138,11 @@ def action():
         # 上一张图片
         if current_image_index > 0:
             current_image_index -= 1
+
+    elif op == 'next_page':
+        # 下 10 张
+        if (current_page + 1) * images_per_page < len(images):
+            current_page += 1
 
     return redirect(url_for('index'))
 

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Thumbnails</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .thumbnail {
+      display: inline-block;
+      margin: 10px;
+      text-align: center;
+    }
+    img {
+      width: 150px;
+      height: auto;
+      border: 1px solid #ccc;
+      display: block;
+    }
+    .nav {
+      margin-top: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Thumbnails (Page {{ current_page+1 }} / {{ total_pages }})</h1>
+  <div>
+    {% for thumbnail in thumbnails %}
+      <div class="thumbnail">
+        <a href="{{ url_for('view_image', image_index=(current_page * 10 + loop.index0)) }}">
+          <img src="{{ url_for('serve_image', image_index=(current_page * 10 + loop.index0)) }}" alt="Thumbnail">
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+  <div class="nav">
+    {% if has_next_page %}
+      <form action="{{ url_for('action') }}" method="post">
+        <button type="submit" name="op" value="next_page">Next 10 Images</button>
+      </form>
+    {% endif %}
+  </div>
+</body>
+</html>
