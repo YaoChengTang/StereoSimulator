@@ -192,11 +192,11 @@ def action():
 
     elif op == 'next_page':
         # 下 10 张
-        if start_idx + images_per_page + 10 < len(images):
-            start_idx += 10
+        if start_idx + images_per_page + images_per_page < len(images):
+            start_idx += images_per_page
     elif op == 'prev_page':  # 上一页
-        if start_idx > 10:
-            start_idx -= 10
+        if start_idx > images_per_page:
+            start_idx -= images_per_page
         else:
             start_idx = 0
     return redirect(url_for('index'))
@@ -225,7 +225,7 @@ def delete_images():
                 continue
 
             images.pop(index)  # 从列表中移除
-    start_idx += 10 - len(deleted_files)
+    start_idx += images_per_page - len(deleted_files)
     print(start_idx)
     return jsonify({"deleted": deleted_files})
 
@@ -233,7 +233,7 @@ def delete_images():
 def delete_page():
     global current_image_index, start_idx
     deleted_files = []
-    for index in range(10):
+    for index in range(images_per_page):
         if 0 <= start_idx < len(images):
             filename = images[start_idx]
             image_path = os.path.join(IMAGE_FOLDER, filename)
