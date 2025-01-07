@@ -13,7 +13,7 @@ IMAGE_FOLDER = None
 images = []
 current_page = 0  # 当前缩略图页面
 start_idx = 0
-images_per_page = 50  # 每页显示的图片数量
+images_per_page = 100  # 每页显示的图片数量
 current_image_index = 0  # 当前查看的图片索引
 
 
@@ -193,7 +193,7 @@ def action():
 
     elif op == 'next_page':
         # 下 10 张
-        if start_idx + images_per_page + images_per_page < len(images):
+        if start_idx + images_per_page < len(images):
             start_idx += images_per_page
     elif op == 'prev_page':  # 上一页
         if start_idx > images_per_page:
