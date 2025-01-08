@@ -85,21 +85,7 @@
     <button type="submit">Change Folder</button>
   </form>
 
-  <div id="thumbnails">
-    {% for thumbnail in thumbnails %}
-      <div class="thumbnail">
-        <!-- 左键点击查看详情 -->
-        <a href="{{ url_for('view_image', image_index=(start_idx + loop.index0)) }}">
-          <img 
-            src="{{ url_for('serve_compressed_image', image_index=(start_idx + loop.index0)) }}" 
-            alt="Thumbnail"
-            data-index="{{ start_idx + loop.index0 }}"
-          >
-        </a>
-      </div>
-    {% endfor %}
-  </div>
-
+  
   <div class="nav">
     <form method="POST" action="{{ url_for('action') }}">
       <input type="hidden" name="op" value="prev_page">
@@ -118,6 +104,20 @@
     <button class="delete-page" onclick="deletePage()">Delete This Page</button>
   </div>
 
+  <div id="thumbnails">
+    {% for thumbnail in thumbnails %}
+      <div class="thumbnail">
+        <!-- 左键点击查看详情 -->
+        <a href="{{ url_for('view_image', image_index=(start_idx + loop.index0)) }}">
+          <img 
+            src="{{ url_for('serve_compressed_image', image_index=(start_idx + loop.index0)) }}" 
+            alt="Thumbnail"
+            data-index="{{ start_idx + loop.index0 }}"
+          >
+        </a>
+      </div>
+    {% endfor %}
+  </div>
   <!-- 选择框 -->
   <div id="selection-box"></div>
 
