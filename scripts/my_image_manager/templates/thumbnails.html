@@ -101,17 +101,16 @@
   </div>
 
   <div class="nav">
+    <form method="POST" action="{{ url_for('action') }}">
+      <input type="hidden" name="op" value="prev_page">
+      <button type="submit">Prev Page</button>
+    </form>
     {% if has_next_page %}
-      <form method="POST" action="{{ url_for('action') }}">
-        <input type="hidden" name="op" value="prev_page">
-        <button type="submit">Prev Page</button>
-      </form>
       <form method="POST" action="{{ url_for('action') }}">
         <input type="hidden" name="op" value="next_page">
         <button type="submit">Next Page</button>
       </form>
     {% endif %}
-
     <!-- 删除选中图片按钮 -->
     <button class="delete-selected" onclick="deleteSelectedImages()">Delete Selected Images</button>
     
