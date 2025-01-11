@@ -7,3 +7,10 @@
 [submodule "DepthCrafter"]
     path = DepthCrafter
     url = git@github.com:Tencent/DepthCrafter.git
+[submodule "InstantSplat"]
+	path = InstantSplat
+	url = git@github.com:jiaxiZeng/InstantSplat.git
+[submodule "Temporally-Consistent-Stereo-Matching"]
+	path = Temporally-Consistent-Stereo-Matching
+	url = git@github.com:jiaxiZeng/Temporally-Consistent-Stereo-Matching.git
+	branch = stereo_sim_dev
