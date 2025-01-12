@@ -75,22 +75,66 @@ max_workers = 10
 # np.save(os.path.join(cache_root, "zeng.npy"), video_paths_3)
 
 
-user = input("input your name (yao, liu, zeng):")
-start_video_idx = input("start from video index:")
-start_video_idx = int(start_video_idx) if start_video_idx else 0
-print(f"Start from {start_video_idx} frame")
+# user = input("input your name (yao, liu, zeng):")
+# start_video_idx = input("start from video index:")
+# start_video_idx = int(start_video_idx) if start_video_idx else 0
+# print(f"Start from {start_video_idx} frame")
 
-video_paths = np.load(os.path.join(cache_root, "{}.npy".format(user)))
-video_paths.sort()
-for video_idx, video_path in enumerate(video_paths[start_video_idx:]):
-    print("\r\n", "-"*10, f"Processing {video_idx+start_video_idx}/{len(video_paths)} frame", "-"*10, "\r\n")
-    frame_list, frame_count = parser_video(video_path)
-    video_rel_path = "/".join(video_path.split("/")[-2:])
-    print(f"raw video path: {video_path}")
-    print(f"relative path: {video_rel_path}")
-    save_frames(frames_root, video_rel_path, frame_list, max_workers)
-    while True:
-        if input("enter n to process next video:")=='n':
-            break
+# video_paths = np.load(os.path.join(cache_root, "{}.npy".format(user)))
+# video_paths.sort()
+# for video_idx, video_path in enumerate(video_paths[start_video_idx:]):
+#     print("\r\n", "-"*10, f"Processing {video_idx+start_video_idx}/{len(video_paths)} frame", "-"*10, "\r\n")
+#     frame_list, frame_count = parser_video(video_path)
+#     video_rel_path = "/".join(video_path.split("/")[-2:])
+#     print(f"raw video path: {video_path}")
+#     print(f"relative path: {video_rel_path}")
+#     save_frames(frames_root, video_rel_path, frame_list, max_workers)
+#     while True:
+#         if input("enter n to process next video:")=='n':
+#             break
 
 
+abnormal_cnt = 0
+video_rel_path_list = []
+frames_rel_dir_list = []
+for user, length in [("liu", 650), ("zeng", 300), ("yao", 970)]:
+    video_paths = np.load(os.path.join(cache_root, "{}.npy".format(user)))
+    video_paths.sort()
+    for video_idx, video_path in enumerate(video_paths[:length]):
+        video_rel_path = "/".join(video_path.split("/")[-2:])
+
+        sub_dir, ext = os.path.splitext(video_rel_path)
+        sub_dir = process_string(sub_dir)
+        if len(sub_dir)==0:
+            sub_dir = f"{abnormal_cnt}"
+            abnormal_cnt += 1
+        
+        # if sub_dir.find("DIY_Textured_") != -1:
+        #     print(f"raw video path: {video_path}")
+        #     print(f"relative path: {video_rel_path}")
+        #     print(f"frames_rel_dir: {sub_dir}")
+
+        #     frames_dir = os.path.join(frames_root, sub_dir)
+        #     print(frames_dir)
+        #     print(os.path.exists(frames_dir))
+        #     # print(len(os.listdir(frames_dir)))
+        
+        frames_dir = os.path.join(frames_root, sub_dir)
+        if not os.path.exists(frames_dir) or len(os.listdir(frames_dir))==0:
+            print(f"terrible video: {video_rel_path}   ->   {sub_dir}")
+            continue
+        
+        if video_idx%100==0:
+            print(f"raw video path: {video_path}")
+            print(f"relative path: {video_rel_path}")
+            print(f"frames_rel_dir: {sub_dir}")
+
+        video_rel_path_list.append(video_rel_path)
+        frames_rel_dir_list.append(sub_dir)
+
+
+import pandas as pd
+df = {"video_rel_path": video_rel_path_list,
+      "frames_rel_dir": frames_rel_dir_list}
+df = pd.DataFrame(df)
+df.to_csv("/data2/Fooling3D/meta_data/frames_metadata.csv", index=False)
