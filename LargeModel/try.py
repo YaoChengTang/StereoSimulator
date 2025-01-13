@@ -67,6 +67,7 @@ inputs = processor(
     padding=True,
     return_tensors="pt",
 )
+print(inputs)
 inputs = inputs.to("cuda")
 
 # Inference: Generation of the output

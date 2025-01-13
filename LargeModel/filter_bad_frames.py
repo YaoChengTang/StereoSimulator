@@ -1,6 +1,9 @@
 import os
 import csv
 import multiprocessing
+# Set the multiprocessing start method to 'spawn' as required by pytorch in multiprocessing
+multiprocessing.set_start_method('spawn', force=True)
+
 import logging
 import argparse
 from datetime import datetime
@@ -11,6 +14,9 @@ from qwen_vl_utils import process_vision_info
 
 from utils.utils import parser_video, save_frames
 import pandas as pd
+
+DEBUG_ENVS = os.getenv('DEBUG_ENVS', 'False').lower() == 'true'
+
 
 
 def setup_logging(gpu_id):
@@ -26,8 +32,9 @@ def setup_logging(gpu_id):
         ]
     )
 
-def log_info(message):
-    logging.info(message)
+def log_info(message, silence=True):
+    if DEBUG_ENVS or not silence:
+        logging.info(message)
 
 def process_video(video_path, frames_root, videos_root, max_workers=6, meta_root="./cache"):
     """Process a video: parse, save frames, and gather metadata."""
@@ -48,7 +55,7 @@ def process_video(video_path, frames_root, videos_root, max_workers=6, meta_root
         with open(os.path.join(meta_root, 'failure_video.csv'), 'a', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow([video_path])
-        print(f"[ERROR] Failed to process {video_path}: \r\n {e}")
+        log_info(f"[ERROR] Failed to process {video_path}: \r\n {e}", silence=False)
         return None
 
 # Producer function to process video and save frames
@@ -84,9 +91,8 @@ def process_frames(frame_paths, model, processor, csv_writer):
     messages = [setup_prompt(frame_path) for frame_path in frame_paths]
     inputs = process_prompt(messages, model, processor)
     output_texts = inference(model, processor, inputs)
-    print(output_texts, flush=True)
     for frame_path, output_text in zip(frame_paths, output_texts):
-        log_info(f'Frame path: {frame_path}, output text: {output_text}')
+        log_info(f'Frame path: {frame_path}, output text: {output_text}', silence=False)
         # if judge(output_text):
         #     csv_writer.writerow([frame_path])
         # else:
@@ -94,7 +100,7 @@ def process_frames(frame_paths, model, processor, csv_writer):
 
 def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
     # default: Load the model on the available device(s)
-    log_info(f"Start loading model and processor from {model_path}")
+    log_info(f"Start loading model and processor from {model_path}", silence=False)
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         model_path, torch_dtype="auto", device_map="auto"
     )
@@ -132,9 +138,9 @@ def process_prompt(messages, model, processor):
         processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
         for msg in messages
     ]
-    log_info(f"Processed texts prompt for {len(messages)} messages")
+    log_info(f"Complete texts prompt for {len(messages)} messages")
     image_inputs, video_inputs = process_vision_info(messages)
-    log_info(f"Processed image prompt for {len(messages)} messages")
+    log_info(f"Complete image prompt for {len(messages)} messages")
     inputs = processor(
         text=texts,
         images=image_inputs,
@@ -142,8 +148,10 @@ def process_prompt(messages, model, processor):
         padding=True,
         return_tensors="pt",
     )
+    log_info(f"Complete inputs for {len(messages)} messages")
+    log_info(f"Inputs: {inputs}")
     inputs = inputs.to("cuda")
-    log_info(f"Processed prompt for {len(messages)} messages")
+    log_info(f"Complete prompt for {len(messages)} messages")
     return inputs
 
 def inference(model, processor, inputs):
@@ -169,7 +177,14 @@ def main(video_path_csv, gpu_id, max_queue_size, frames_root='frames', videos_ro
              f'gpu_id={gpu_id}, max_queue_size={max_queue_size}, ' +
              f'frames_root={frames_root}, videos_root={videos_root}, ' + 
              f'max_workers={max_workers}, num_producers={num_producers}, ' +
-             f'meta_root={meta_root}, step={step}')
+             f'meta_root={meta_root}, step={step}', silence=False)
+
+    device = torch.cuda.current_device()
+    log_info(f"Current CUDA device: {device}")
+    log_info(f"Device name: {torch.cuda.get_device_name(device)}")
+    log_info(f"cuda avaible: {torch.cuda.is_available()}")
+    log_info(f"memory allocated: {torch.cuda.memory_allocated()}")
+    log_info(f"memory cached: {torch.cuda.memory_cached()}")
 
     model, processor = setup_model()
 
@@ -196,7 +211,7 @@ def main(video_path_csv, gpu_id, max_queue_size, frames_root='frames', videos_ro
     dir_queue.join()
     consumer_process.terminate()
 
-    log_info(f'Processed {len(video_paths)} videos.')
+    log_info(f'Processed {len(video_paths)} videos.', silence=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process videos and filter bad frames.')
