@@ -9,6 +9,22 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 
+def safe_remove(file_path):
+    # Check if the file exists before attempting to remove it
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            raise(f"Error: {e}")
+
+def transform_string_to_array(input_string):
+    return [1 if x.strip().lower() == 'yes' else 0 for x in input_string.split(',')]
+
+def decide_save(results):
+    if 1 in results[:-5] and 1 not in results[-5:]:
+        return True
+    return False
+
 def parser_video(path, fps_exp = 2):
     # return frame_list, fps, frame_cnt
     cap = cv2.VideoCapture(path)

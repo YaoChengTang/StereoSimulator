@@ -3,6 +3,8 @@ import sys
 import csv
 import logging
 import argparse
+import pandas as pd
+from tqdm import tqdm
 from datetime import datetime
 
 import torch
@@ -11,15 +13,15 @@ from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
 from utils.utils import parser_video, save_frames
-import pandas as pd
-from tqdm import tqdm
+from utils.utils import decide_save, transform_string_to_array, safe_remove
+
 
 DEBUG_ENVS = os.getenv('DEBUG_ENVS', 'False').lower() == 'true'
 
-def setup_logging(gpu_id):
+def setup_logging(gpu_id, exp_name="EXP"):
     log_dir = './logs'
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_GPU_{gpu_id}.log')
+    log_file = os.path.join(log_dir, f'{datetime.now().strftime("%Y%m%d_%H%M%S")}-{gpu_id}-{exp_name}.log')
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(process)d - %(levelname)s - %(message)s',
@@ -72,9 +74,8 @@ def process_frames(frame_paths, model, processor, csv_writer):
     inputs = process_prompt(messages, model, processor)
     output_texts = inference(model, processor, inputs)
     for frame_path, output_text in zip(frame_paths, output_texts):
-        log_info(f'Frame path: {frame_path}, output text: {output_text}', silence=False)
-        if output_text.find("yes") != -1:
-            csv_writer.writerow([frame_path])
+        # if output_text.find("yes") != -1:
+        csv_writer.writerow([frame_path+','+output_text])
     return output_texts
 
 def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
@@ -82,13 +83,31 @@ def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         model_path, torch_dtype="auto", device_map="auto"
     )
-    processor = AutoProcessor.from_pretrained(model_path)
+    min_pixels = 256 * 28 * 28
+    max_pixels = 1024 * 28 * 28
+    processor = AutoProcessor.from_pretrained(
+        model_path, min_pixels=min_pixels, max_pixels=max_pixels,
+    )
+    # processor = AutoProcessor.from_pretrained(model_path)
     log_info(f"Model and processor loaded from {model_path}")
     return model, processor
 
 def setup_prompt(image_path, text=None):
     if text is None:
-        text = "If any answer to the following questions is yes, return 'yes', otherwise return 'no'.  Does this image feature any artistic creation of landscapes on a flat surface? Does this image contain any areas with perspective illusion? Does this image contain any optical illusion graffiti or artwork? Does this image contain any transparent or high-reflective areas? Does this image show a display screen playing 3D objects or scenes? Does the image contain areas that make you mistake them for 3D objects? Does this image have no or little watermarks or captions that affect its quality? Is this image quality high and not too blurry? "
+        # text = "If any answer to the following questions is yes, return 'yes', otherwise return 'no'. Does this image feature any artistic creation of landscapes on a flat surface? Does this image contain any areas with perspective illusion? Does this image contain any optical illusion graffiti or artwork?  Are these illusion artworks complete, not semi-finished products? Does this image contain any transparent or high-reflective areas? Does this image show a display screen playing 3D objects or scenes? Does the image contain areas that make you mistake them for 3D objects? Does this image have no or little watermarks or captions that affect its quality? Is this image quality high and not too blurry? Is the image resolution larger than 600*600? Are most areas of the artistic creation or illusion not covered by an artist's body or a single/two hands from an artist?"
+        text = "Return 'yes or 'no' for each following question. " + \
+               "Does this image feature any flat artistic creation of landscapes where the surface of the creation is flat and has no ups and downs? " + \
+               "Does this image contain any areas with perspective illusion? " + \
+               "Does this image contain any optical illusion graffiti or artwork? " + \
+               "Does this image contain any transparent or high-reflective areas? " + \
+               "Does this image show a display screen playing 3D objects or scenes? " + \
+               "Does the image contain areas that make you mistake them for 3D objects? " + \
+               "Does this image have excessive watermarks or captions that affect its quality? " + \
+               "Is this image too blurry? " + \
+               "Are most areas of the artistic creation or illusion covered by an artist's body or a single/two hands from an artist? " + \
+               "Is this image a screenshot of a software interface? " + \
+               "Are these artworks works in progress or half-finished? " + \
+               "Reply to me in the format of a string concatenating yes or no with ','"
     
     messages = [
         {
@@ -146,17 +165,17 @@ def init_root(frames_root, meta_root):
 def main(args):
     init_root(args.frames_root, args.meta_root)
     setup_logging(args.gpu_id)
-    log_info(f'Input parameters: video_path_csv={args.video_path_csv}, ' +
-             f'gpu_id={args.gpu_id}, batch_size={args.batch_size}, ' +
-             f'frames_root={args.frames_root}, videos_root={args.videos_root}, ' + 
-             f'meta_root={args.meta_root}, step={args.step}', silence=False)
+    log_info(f'Input parameters: exp_name={args.exp_name}, video_path_csv={args.video_path_csv}, ' +
+             f'gpu_id={args.gpu_id}, batch_size={args.batch_size}, num_workers={args.num_workers}, ' +
+             f'num_thread={args.num_thread}, frames_root={args.frames_root}, videos_root={args.videos_root}, ' + 
+             f'meta_root={args.meta_root}, max_step={args.max_step}, num_clip={args.num_clip}, model_path={args.model_path}', silence=False)
 
     device = torch.cuda.current_device()
     log_info(f"Current CUDA device: {device}")
     log_info(f"Device name: {torch.cuda.get_device_name(device)}")
     log_info(f"cuda available: {torch.cuda.is_available()}")
     log_info(f"memory allocated: {torch.cuda.memory_allocated()}")
-    log_info(f"memory cached: {torch.cuda.memory_cached()}")
+    log_info(f"memory cached: {torch.cuda.memory_reserved()}")
 
     model, processor = setup_model(args.model_path)
 
@@ -164,7 +183,7 @@ def main(args):
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_file = os.path.join(args.meta_root, f'{timestamp}_{args.gpu_id}_good_images.csv')
+    csv_file = os.path.join(args.meta_root, f'{timestamp}-{args.gpu_id}-{args.exp_name}-good_images.csv')
 
     with open(csv_file, 'a', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
@@ -175,26 +194,75 @@ def main(args):
                 log_info(f"There is a invalid dir_path !!!")
                 continue
 
-            # collect all frame paths
+            # Collect all frame paths
             frame_paths = []
             for root, _, files in os.walk(dir_path):
                 for file in files:
                     file_path = os.path.join(root, file)
                     frame_paths.append(file_path)
             frame_paths.sort()
-            log_info(f'Total number of frames to process: {len(frame_paths)}', silence=False)
+            log_info(f'Total number of frames to process: {len(frame_paths)} in {dir_path}', silence=False)
             # print(f'Total number of frames to process: {len(frame_paths)}')
 
-            # process frames
-            for idx, file_path in enumerate(tqdm(frame_paths, desc=f"Processing frames (PID: {os.getpid()}, video: {vide_idx}/{total_num_videos})")):
-                if idx % args.step == 0:
+            # Process frames
+            step = min(args.max_step, len(frame_paths) // args.num_clip)
+            completed = False
+            for frame_idx, file_path in enumerate(tqdm(frame_paths, desc=f"Processing frames (PID: {os.getpid()}, video: {vide_idx}/{total_num_videos})")):
+                if not os.path.exists(file_path):
+                    continue
+                
+                if frame_idx % step == 0:
                     output_texts = process_frames([file_path], model, processor, csv_writer)
-                    log_info("-"*10 + f" idx: {idx}  ---   ", output_texts)
+                    output_text  = output_texts[0]
+                    log_info("-"*10 + f" frame_idx: {frame_idx}   ---   {output_text}", silence=False)
 
-    log_info(f'Processed {len(video_paths)} videos.', silence=False)
+                    # Delete bad frames
+                    # if output_text.lower().find("yes")==-1:
+                    if not decide_save(transform_string_to_array(output_text)):
+                        log_info(f"Find a bad frame: frame_idx: {frame_idx}, {file_path}", silence=False)
+                        start_idx = max(0, frame_idx - step // 2)
+                        end_idx = min(len(frame_paths), frame_idx + step // 2)
+                        files_to_remove = frame_paths[start_idx:end_idx]
+                        for file_path in files_to_remove:
+                            safe_remove(file_path)
+                        deleted = True
+                    else:
+                        deleted = False
+
+                elif not completed and frame_idx > len(frame_paths) // step * step:
+                    # If step is large, there may be some valuable frames not processed in the last part of frames
+                    again_start_idx = len(frame_paths) // step * step + deleted * (step // 2)
+                    if len(frame_paths) - again_start_idx + 1 > args.max_step//2:
+                        step = (len(frame_paths) - again_start_idx + 1) // args.num_clip
+                        for frame_idx in range(again_start_idx, len(frame_paths)):
+                            if frame_idx % step == 0:
+                                output_texts = process_frames([frame_paths[frame_idx]], model, processor, csv_writer)
+                                output_text  = output_texts[0]
+                                log_info("-"*10 + f" frame_idx: {frame_idx}  ---   {output_text}", silence=False)
+
+                                # Delete bad frames
+                                # if output_text.lower().find("yes")==-1:
+                                if not decide_save(transform_string_to_array(output_text)):
+                                    log_info(f"Find a bad frame: frame_idx: {frame_idx}, {frame_paths[frame_idx]}", silence=False)
+                                    start_idx = max(again_start_idx, frame_idx - step // 2)
+                                    end_idx = min(len(frame_paths), frame_idx + step // 2)
+                                    files_to_remove = frame_paths[start_idx:end_idx]
+                                    for file_path in files_to_remove:
+                                        safe_remove(file_path)
+                    
+                    # The last several frames mainly contain many watermarks or captions, so we remove them
+                    remain_start_idx = again_start_idx + (len(frame_paths) - again_start_idx + 1) // step * step
+                    files_to_remove = frame_paths[remain_start_idx:]
+                    for file_path in files_to_remove:
+                        safe_remove(file_path)
+                    
+                    completed = True
+
+    log_info(f'Processed {total_num_videos} videos.', silence=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process videos and filter bad frames.')
+    parser.add_argument('--exp_name', type=str, default="", help='Experiment name')
     parser.add_argument('--video_path_csv', type=str, help='Path to the CSV file containing video paths')
     parser.add_argument('--gpu_id', type=str, help='GPU ID for logging purposes')
     parser.add_argument('--batch_size', type=int, help='Batch size for DataLoader')
@@ -203,7 +271,8 @@ if __name__ == "__main__":
     parser.add_argument('--frames_root', type=str, default="/data2/Fooling3D/video_frame_sequence", help='frames root directory')
     parser.add_argument('--videos_root', type=str, default="/data2/Fooling3D/videos", help='root directory of videos')
     parser.add_argument('--meta_root', type=str, default="/data2/Fooling3D/meta_data", help='root directory of metadata')
-    parser.add_argument('--step', type=int, default=1, help='step size for processing frames')
+    parser.add_argument('--max_step', type=int, default=1, help='maximum step size for processing frames')
+    parser.add_argument('--num_clip', type=int, default=1, help='expected number of clips for processing frames')
     parser.add_argument('--model_path', type=str, default="/mount_points/nas/Qwen2-VL-2B-Instruct", help='path to the model')
     args = parser.parse_args()
 
