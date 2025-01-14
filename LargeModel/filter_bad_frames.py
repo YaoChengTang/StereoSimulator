@@ -1,4 +1,5 @@
 import os
+import sys
 import csv
 import multiprocessing
 # Set the multiprocessing start method to 'spawn' as required by pytorch in multiprocessing
@@ -14,6 +15,7 @@ from qwen_vl_utils import process_vision_info
 
 from utils.utils import parser_video, save_frames
 import pandas as pd
+from tqdm import tqdm
 
 DEBUG_ENVS = os.getenv('DEBUG_ENVS', 'False').lower() == 'true'
 
@@ -62,30 +64,51 @@ def process_video(video_path, frames_root, videos_root, max_workers=6, meta_root
 def producer(video_path, frames_root, videos_root, dir_queue, max_workers=6, meta_root="./cache"):
     output_dir = process_video(video_path, frames_root, videos_root, max_workers, meta_root)
     log_info(f'Processed video {video_path}, output dir: {output_dir}')
+    # print(f'Processed video {video_path}, output dir: {output_dir}')
     if output_dir:
         dir_queue.put(output_dir)
 
 # Consumer function to judge images and save good ones to CSV
-def consumer(csv_file, dir_queue, model, processor, step=1):
+def consumer(csv_file, dir_queue, model, processor, step=1, total_num_videos=None):
+    processed_num_videos = 0
     while True:
         try:
-            dir_path = dir_queue.get(timeout=10)  # Wait for a directory path
+            dir_path = dir_queue.get(timeout=30)  # Wait for a directory path
         except multiprocessing.queues.Empty:
-            break
+            log_info("No more directories to process.", silence=False)
+            print("No more directories to process.")
+            sys.exit(1)
+        except Exception as e:
+            log_info(f"Error while getting directory from queue: {e}", silence=False)
+            print(f"Error while getting directory from queue: {e}")
+            sys.exit(1)
+        
+        log_info(f'Consumer is processing {dir_path}', silence=False)
+        print("-"*10+" ", f'Consumer is processing {dir_path}...', flush=True)
 
-        with open(csv_file, 'a', newline='') as csvfile:
-            csv_writer = csv.writer(csvfile)
-            frame_paths = []
-            for root, _, files in os.walk(dir_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    frame_paths.append(file_path)
-                    if len(frame_paths) == step:
-                        process_frames(frame_paths, model, processor, csv_writer)
-                        frame_paths = []
-            if frame_paths:
-                process_frames(frame_paths, model, processor, csv_writer)
-        dir_queue.task_done()
+        try:
+            with open(csv_file, 'a', newline='') as csvfile:
+                csv_writer = csv.writer(csvfile)
+                frame_paths = []
+                for root, _, files in os.walk(dir_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        frame_paths.append(file_path)
+                
+                frame_paths.sort()
+                log_info(f'Total number of frames to process: {len(frame_paths)}', silence=False)
+                print(f'Total number of frames to process: {len(frame_paths)}')
+
+                processed_num_videos += 1
+                for idx, file_path in enumerate(tqdm(frame_paths, desc=f"Processing frames (PID: {os.getpid()}, video: {processed_num_videos}/{total_num_videos})")):
+                    if idx % step == 0:
+                        output_texts = process_frames([file_path], model, processor, csv_writer)
+                        print("-"*10, f" idx: {idx}  ---   ", output_texts)
+            dir_queue.task_done()
+        except Exception as e:
+            log_info(f"Error while processing frames: {e}", silence=False)
+            print(f"Error while processing frames: {e}", flush=True)
+            sys.exit(1)
 
 def process_frames(frame_paths, model, processor, csv_writer):
     messages = [setup_prompt(frame_path) for frame_path in frame_paths]
@@ -93,10 +116,9 @@ def process_frames(frame_paths, model, processor, csv_writer):
     output_texts = inference(model, processor, inputs)
     for frame_path, output_text in zip(frame_paths, output_texts):
         log_info(f'Frame path: {frame_path}, output text: {output_text}', silence=False)
-        # if judge(output_text):
-        #     csv_writer.writerow([frame_path])
-        # else:
-        #     os.remove(frame_path)
+        if output_text.find("yes") != -1:
+            csv_writer.writerow([frame_path])
+    return output_texts
 
 def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
     # default: Load the model on the available device(s)
@@ -113,7 +135,8 @@ def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
 
 def setup_prompt(image_path, text=None):
     if text is None:
-        text = "Describe this image."
+        # text = "Describe this image."
+        text = "If any answer to the following questions is yes, return 'yes', otherwise return 'no'. Does this image feature any artistic creation of landscapes on a flat surface? Does this image contain any areas with perspective illusion? Does this image contain any optical illusion graffiti or artwork? Does this image show a display screen playing 3D objects or scenes? Does this image have excessive watermarks or captions that affect its quality? Is this image too blurry? Does the image contain areas that make you mistake them for 3D objects?"
     
     messages = [
         {
@@ -170,7 +193,7 @@ def init_root(frames_root, meta_root):
     os.makedirs(frames_root, exist_ok=True)
     os.makedirs(meta_root, exist_ok=True)
 
-def main(video_path_csv, gpu_id, max_queue_size, frames_root='frames', videos_root='videos', max_workers=6, num_producers=3, meta_root='./cache', step=1):
+def main(video_path_csv, gpu_id, max_queue_size, frames_root='frames', videos_root='videos', max_workers=6, num_producers=3, meta_root='./cache', step=1, model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
     init_root(frames_root, meta_root)
     setup_logging(gpu_id)
     log_info(f'Input parameters: video_path_csv={video_path_csv}, ' +
@@ -186,7 +209,7 @@ def main(video_path_csv, gpu_id, max_queue_size, frames_root='frames', videos_ro
     log_info(f"memory allocated: {torch.cuda.memory_allocated()}")
     log_info(f"memory cached: {torch.cuda.memory_cached()}")
 
-    model, processor = setup_model()
+    model, processor = setup_model(model_path)
 
     dir_queue = multiprocessing.JoinableQueue(maxsize=max_queue_size)
 
@@ -201,8 +224,10 @@ def main(video_path_csv, gpu_id, max_queue_size, frames_root='frames', videos_ro
             producers.append(producer_process)
             producer_process.start()
 
-    consumer_process = multiprocessing.Process(target=consumer, args=(os.path.join(meta_root,'good_images.csv'), 
-                                                                      dir_queue, model, processor, step))
+    total_num_videos = len(video_paths)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    consumer_process = multiprocessing.Process(target=consumer, args=(os.path.join(meta_root, f'{timestamp}_{gpu_id}_good_images.csv'), 
+                                                                      dir_queue, model, processor, step, total_num_videos))
     consumer_process.start()
 
     for producer_process in producers:
@@ -224,6 +249,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_workers', type=int, default=6, help='maximum number of workers')
     parser.add_argument('--num_producers', type=int, default=6, help='maximum number of producers')
     parser.add_argument('--step', type=int, default=1, help='step size for processing frames')
+    parser.add_argument('--model_path', type=str, default="/mount_points/nas/Qwen2-VL-2B-Instruct", help='path to the model')
     args = parser.parse_args()
 
-    main(args.video_path_csv, args.gpu_id, args.max_queue_size, args.frames_root, args.videos_root, args.max_workers, args.num_producers, args.meta_root, args.step)
+    main(args.video_path_csv, args.gpu_id, args.max_queue_size, args.frames_root, args.videos_root, args.max_workers, args.num_producers, args.meta_root, args.step, args.model_path)
