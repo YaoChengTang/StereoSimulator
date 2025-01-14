@@ -95,19 +95,18 @@ def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
 def setup_prompt(image_path, text=None):
     if text is None:
         # text = "If any answer to the following questions is yes, return 'yes', otherwise return 'no'. Does this image feature any artistic creation of landscapes on a flat surface? Does this image contain any areas with perspective illusion? Does this image contain any optical illusion graffiti or artwork?  Are these illusion artworks complete, not semi-finished products? Does this image contain any transparent or high-reflective areas? Does this image show a display screen playing 3D objects or scenes? Does the image contain areas that make you mistake them for 3D objects? Does this image have no or little watermarks or captions that affect its quality? Is this image quality high and not too blurry? Is the image resolution larger than 600*600? Are most areas of the artistic creation or illusion not covered by an artist's body or a single/two hands from an artist?"
-        text = "Return 'yes or 'no' for each following question. " + \
+        text = "Reply to me in the format of a string concatenating 'yes' or 'no' with ','. Each 'yes or 'no' is an answer to each following question. " + \
                "Does this image feature any flat artistic creation of landscapes where the surface of the creation is flat and has no ups and downs? " + \
                "Does this image contain any areas with perspective illusion? " + \
                "Does this image contain any optical illusion graffiti or artwork? " + \
                "Does this image contain any transparent or high-reflective areas? " + \
                "Does this image show a display screen playing 3D objects or scenes? " + \
                "Does the image contain areas that make you mistake them for 3D objects? " + \
-               "Does this image have excessive watermarks or captions that affect its quality? " + \
+               "Does this image contain excessive watermarks or captions that seriously affect its quality? " + \
+               "Does this image contain small watermarks or captions or on a corner? " + \
                "Is this image too blurry? " + \
-               "Are most areas of the artistic creation or illusion covered by an artist's body or a single/two hands from an artist? " + \
-               "Is this image a screenshot of a software interface? " + \
-               "Are these artworks works in progress or half-finished? " + \
-               "Reply to me in the format of a string concatenating yes or no with ','"
+               "Are most regions of the artistic creation covered by a single/two hands? " + \
+               "Is this image a software interface? "
     
     messages = [
         {
@@ -215,6 +214,10 @@ def main(args):
                     output_texts = process_frames([file_path], model, processor, csv_writer)
                     output_text  = output_texts[0]
                     log_info("-"*10 + f" frame_idx: {frame_idx}   ---   {output_text}", silence=False)
+
+                    # arr = transform_string_to_array(output_text)
+                    # res = decide_save(arr)
+                    # log_info(f"arr: {arr}, res: {res}", silence=False)
 
                     # Delete bad frames
                     # if output_text.lower().find("yes")==-1:
