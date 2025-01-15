@@ -163,7 +163,7 @@ def init_root(frames_root, meta_root):
 
 def main(args):
     init_root(args.frames_root, args.meta_root)
-    setup_logging(args.gpu_id)
+    setup_logging(args.gpu_id, args.exp_name)
     log_info(f'Input parameters: exp_name={args.exp_name}, video_path_csv={args.video_path_csv}, ' +
              f'gpu_id={args.gpu_id}, batch_size={args.batch_size}, num_workers={args.num_workers}, ' +
              f'num_thread={args.num_thread}, frames_root={args.frames_root}, videos_root={args.videos_root}, ' + 

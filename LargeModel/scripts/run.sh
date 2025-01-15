@@ -1,9 +1,11 @@
 #!/bin/bash
 
 # frames_root="/data2/Fooling3D/video_frame_sequence"
-frames_root="./cache/video_frame_sequence"
+# frames_root="./cache/video_frame_sequence"
+frames_root="/data2/Fooling3D/video_frame_sequence_beta"
 videos_root="/data2/Fooling3D/videos"
-CSV_FILE="./cache/tmp_file.csv"    # Path to the CSV file containing the video paths
+# CSV_FILE="./cache/tmp_file.csv"    # Path to the CSV file containing the video paths
+CSV_FILE="/data2/Fooling3D/meta_data/frames_metadata_beta.csv"    # Path to the CSV file containing the video paths
 
 # meta_root="/data2/Fooling3D/meta_data"
 meta_root="./cache"
@@ -15,7 +17,7 @@ max_step=100
 num_clip=10
 batch_size=1
 num_workers=4                    # Number of workers for data loading
-num_thread=6                     # Number of threads for saving frames
+num_thread=10                     # Number of threads for saving frames
 
 DEBUG_ENVS=False
 # DEBUG_ENVS=True
