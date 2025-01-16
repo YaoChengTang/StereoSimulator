@@ -19,6 +19,7 @@ batch_size=1
 num_workers=4                    # Number of workers for data loading
 num_thread=10                     # Number of threads for saving frames
 
+
 DEBUG_ENVS=False
 # DEBUG_ENVS=True
 
@@ -31,7 +32,14 @@ else
     exp_name="$1"
 fi
 
+# Check if start_video_idx is provided as an argument
+if [ -z "$2" ]; then
+    start_video_idx=0  # Default value for start_video_idx
+else
+    start_video_idx="$2"
+fi
+
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="/data5/yao/cache"
 
-DEBUG_ENVS=$DEBUG_ENVS CUDA_VISIBLE_DEVICES=$GPU_ID python filter_bad_frames.py --video_path_csv "$CSV_FILE" --gpu_id "$GPU_ID" --batch_size "$batch_size" --frames_root "$frames_root" --videos_root "$videos_root" --num_workers "$num_workers" --num_thread "$num_thread" --meta_root "$meta_root" --max_step "$max_step" --model_path "$model_path" --exp_name "$exp_name" --num_clip "$num_clip"
+DEBUG_ENVS=$DEBUG_ENVS CUDA_VISIBLE_DEVICES=$GPU_ID python filter_bad_frames.py --video_path_csv "$CSV_FILE" --gpu_id "$GPU_ID" --batch_size "$batch_size" --frames_root "$frames_root" --videos_root "$videos_root" --num_workers "$num_workers" --num_thread "$num_thread" --meta_root "$meta_root" --max_step "$max_step" --model_path "$model_path" --exp_name "$exp_name" --num_clip "$num_clip" --start_video_idx "$start_video_idx"

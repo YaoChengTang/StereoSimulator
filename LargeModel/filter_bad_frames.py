@@ -36,16 +36,19 @@ def log_info(message, silence=True):
         logging.info(message)
 
 class VideoDataset(Dataset):
-    def __init__(self, video_path_csv, frames_root, videos_root, meta_root="./cache", num_thread=4):
+    def __init__(self, exp_name, video_path_csv, frames_root, videos_root, meta_root="./cache", num_thread=4, start_video_idx=0):
+        self.exp_name = exp_name
         self.frames_root = frames_root
         self.videos_root = videos_root
         self.meta_root   = meta_root
         self.num_thread  = num_thread
+        self.start_video_idx = start_video_idx
 
         video_df = pd.read_csv(video_path_csv)
         video_paths = [os.path.join(videos_root, video_rel_path) for video_rel_path in video_df['video_rel_path']]
+        log_info(f"Total number of videos: {len(video_paths)}. We start from idx: {self.start_video_idx}", silence=False)
+        video_paths = video_paths[start_video_idx:]
         self.video_paths = video_paths
-        log_info(f"Total number of videos: {len(self.video_paths)}", silence=False)
 
     def __len__(self):
         return len(self.video_paths)
@@ -60,14 +63,14 @@ class VideoDataset(Dataset):
                 raise Exception("Empty frame list.")
 
             rel_path, abs_path = save_frames(self.frames_root, video_rel_path, frame_list, self.num_thread)
-            return abs_path
+            return video_path, abs_path
 
         except Exception as e:
-            with open(os.path.join(self.meta_root, 'failure_video.csv'), 'a', newline='') as csvfile:
+            with open(os.path.join(self.meta_root, f'{self.exp_name}-failure_video.csv'), 'a', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
                 csv_writer.writerow([video_path])
             log_info(f"[ERROR] Failed to process {video_path}: \r\n {e}", silence=False)
-            return None
+            return video_path, ""
 
 def process_frames(frame_paths, model, processor, csv_writer):
     messages = [setup_prompt(frame_path) for frame_path in frame_paths]
@@ -106,7 +109,10 @@ def setup_prompt(image_path, text=None):
                "Does this image contain small watermarks or captions or on a corner? " + \
                "Is this image too blurry? " + \
                "Are most regions of the artistic creation covered by a single/two hands? " + \
-               "Is this image a software interface? "
+               "Is this image a software interface? " + \
+               "Is only the figure of the artist clear, but the others are blurry, like artwork, screen, or  areas that make you mistake them for 3D objects? "
+
+            #    "Is this image a software interface? Is only the figure of the artist clear, but the others are blurry, like artwork, screen, or areas that make you mistake them for 3D objects?"
     
     messages = [
         {
@@ -164,10 +170,8 @@ def init_root(frames_root, meta_root):
 def main(args):
     init_root(args.frames_root, args.meta_root)
     setup_logging(args.gpu_id, args.exp_name)
-    log_info(f'Input parameters: exp_name={args.exp_name}, video_path_csv={args.video_path_csv}, ' +
-             f'gpu_id={args.gpu_id}, batch_size={args.batch_size}, num_workers={args.num_workers}, ' +
-             f'num_thread={args.num_thread}, frames_root={args.frames_root}, videos_root={args.videos_root}, ' + 
-             f'meta_root={args.meta_root}, max_step={args.max_step}, num_clip={args.num_clip}, model_path={args.model_path}', silence=False)
+    args_dict = vars(args)
+    log_info('Input parameters: ' + ', '.join([f'{key}={value}' for key, value in args_dict.items()]), silence=False)
 
     device = torch.cuda.current_device()
     log_info(f"Current CUDA device: {device}")
@@ -178,7 +182,7 @@ def main(args):
 
     model, processor = setup_model(args.model_path)
 
-    dataset = VideoDataset(args.video_path_csv, args.frames_root, args.videos_root, args.meta_root, args.num_thread)
+    dataset = VideoDataset(args.exp_name, args.video_path_csv, args.frames_root, args.videos_root, args.meta_root, args.num_thread, args.start_video_idx)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -186,31 +190,36 @@ def main(args):
 
     with open(csv_file, 'a', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
-        total_num_videos = len(dataloader)
-        for vide_idx, batch in enumerate(dataloader):
-            dir_path = batch[0]
-            if dir_path is None:
-                log_info(f"There is a invalid dir_path !!!")
+        total_num_videos = len(dataloader) + args.start_video_idx
+        for video_idx, (video_paths, frame_seq_dirs) in enumerate(dataloader):
+            video_idx = video_idx + args.start_video_idx
+            video_path = video_paths[0]
+            frame_seq_dir = frame_seq_dirs[0]
+            if frame_seq_dir is None or len(frame_seq_dir)==0:
+                log_info(f"There is a invalid frame_seq_dir for {video_path} !!!")
                 continue
 
             # Collect all frame paths
             frame_paths = []
-            for root, _, files in os.walk(dir_path):
+            for root, _, files in os.walk(frame_seq_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
                     frame_paths.append(file_path)
             frame_paths.sort()
-            log_info(f'Total number of frames to process: {len(frame_paths)} in {dir_path}', silence=False)
+            log_info(f'{video_idx}/{total_num_videos} - Total number of frames to process: {len(frame_paths)} in {frame_seq_dir} for {video_path}', silence=False)
             # print(f'Total number of frames to process: {len(frame_paths)}')
 
+            if len(frame_paths) == 0:
+                continue
+
             # Process frames
-            step = min(args.max_step, len(frame_paths) // args.num_clip)
+            step = max(1, min(args.max_step, len(frame_paths) // args.num_clip))
             completed = False
-            for frame_idx, file_path in enumerate(tqdm(frame_paths, desc=f"Processing frames (PID: {os.getpid()}, video: {vide_idx}/{total_num_videos})")):
+            for frame_idx, file_path in enumerate(tqdm(frame_paths, desc=f"Processing frames (PID: {os.getpid()}, video: {video_idx}/{total_num_videos})")):
                 if not os.path.exists(file_path):
                     continue
                 
-                if frame_idx % step == 0:
+                if not completed and frame_idx % step == 0:
                     output_texts = process_frames([file_path], model, processor, csv_writer)
                     output_text  = output_texts[0]
                     log_info("-"*10 + f" frame_idx: {frame_idx}   ---   {output_text}", silence=False)
@@ -277,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_step', type=int, default=1, help='maximum step size for processing frames')
     parser.add_argument('--num_clip', type=int, default=1, help='expected number of clips for processing frames')
     parser.add_argument('--model_path', type=str, default="/mount_points/nas/Qwen2-VL-2B-Instruct", help='path to the model')
+    parser.add_argument('--start_video_idx', type=int, default=0, help='start from video index')
     args = parser.parse_args()
 
     main(args)

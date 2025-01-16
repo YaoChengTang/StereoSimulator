@@ -21,7 +21,9 @@ def transform_string_to_array(input_string):
     return [1 if x.strip().lower() == 'yes' else 0 for x in input_string.replace(" ", "").split(',')]
 
 def decide_save(results):
-    if 1 in results[:6] and not results[6] and results[7] and 1 not in results[8:]:
+    if 1 in results[:6] \
+       and not (results[6] and not results[7]) \
+       and 1 not in results[8:]:
         return True
     return False
 
