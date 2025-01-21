@@ -87,7 +87,7 @@ def setup_model(model_path="/mount_points/nas/Qwen2-VL-2B-Instruct"):
         model_path, torch_dtype="auto", device_map="auto"
     )
     min_pixels = 256 * 28 * 28
-    max_pixels = 1024 * 28 * 28
+    max_pixels = 1000 * 28 * 28
     processor = AutoProcessor.from_pretrained(
         model_path, min_pixels=min_pixels, max_pixels=max_pixels,
     )
@@ -192,6 +192,10 @@ def main(args):
         csv_writer = csv.writer(csvfile)
         total_num_videos = len(dataloader) + args.start_video_idx
         for video_idx, (video_paths, frame_seq_dirs) in enumerate(dataloader):
+
+            if video_idx%30==0:
+                torch.cuda.empty_cache()
+
             video_idx = video_idx + args.start_video_idx
             video_path = video_paths[0]
             frame_seq_dir = frame_seq_dirs[0]
