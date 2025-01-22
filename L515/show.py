@@ -2,6 +2,7 @@ import pyrealsense2 as rs
 import numpy as np
 import cv2
 import os
+import yaml
 import argparse
 from datetime import datetime
 
@@ -9,6 +10,11 @@ from datetime import datetime
 parser = argparse.ArgumentParser(description="RealSense Stream")
 parser.add_argument('--scene_name', type=str, default=datetime.now().strftime('%Y%m%d_%H%M%S'), help='Scene name for saving images')
 args = parser.parse_args()
+
+# Create scene directory if it doesn't exist
+scene_name = args.scene_name  # Get the scene name from arguments
+if not os.path.exists(scene_name):
+    os.makedirs(scene_name)
 
 # Create a pipeline
 pipeline = rs.pipeline()
@@ -38,10 +44,51 @@ config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
 # Start streaming
 profile = pipeline.start(config)
 
+# 获取 RGB 相机的内参
+color_stream = pipeline.get_active_profile().get_stream(rs.stream.color)
+intrinsics = color_stream.as_video_stream_profile().get_intrinsics()
+
+# 提取 RGB 相机的内参
+fx = intrinsics.fx  # 水平焦距
+fy = intrinsics.fy  # 垂直焦距
+cx = intrinsics.ppx  # 主点 x 坐标
+cy = intrinsics.ppy  # 主点 y 坐标
+height = intrinsics.height
+width  = intrinsics.width
+
+# 打印 RGB 相机的内参
+print("RGB Camera Focal Length (fx, fy):", fx, fy)
+print("RGB Camera Principal Point (cx, cy):", cx, cy)
+print("RGB Camera Resolution (height, width):", height, width)
+
+# 获取畸变系数
+distortion = intrinsics.coeffs
+print("RGB Camera Distortion Coefficients:", distortion)
+
 # Getting the depth sensor's depth scale (see rs-align example for explanation)
 depth_sensor = profile.get_device().first_depth_sensor()
 depth_scale = depth_sensor.get_depth_scale()
 print("Depth Scale is: ", depth_scale)
+
+
+# 将内参存储到字典
+data = {
+    'RGB Camera': {
+        'Focal Length (fx, fy)': [fx, fy],
+        'Principal Point (cx, cy)': [cx, cy],
+        'Resolution (height, width)': [height, width],
+        'Distortion Coefficients': distortion,
+    },
+    'Depth Sensor': {
+        'Depth Scale': depth_scale
+    }
+}
+
+# 将字典写入 YAML 文件
+with open(os.path.join(scene_name, 'calib.yaml'), 'w') as file:
+    yaml.dump(data, file, default_flow_style=False)
+
+
 
 # We will be removing the background of objects more than
 #  clipping_distance_in_meters meters away
@@ -53,11 +100,6 @@ clipping_distance = clipping_distance_in_meters / depth_scale
 # The "align_to" is the stream type to which we plan to align depth frames.
 align_to = rs.stream.color
 align = rs.align(align_to)
-
-# Create scene directory if it doesn't exist
-scene_name = args.scene_name  # Get the scene name from arguments
-if not os.path.exists(scene_name):
-    os.makedirs(scene_name)
 
 # Streaming loop
 cnt = 0
