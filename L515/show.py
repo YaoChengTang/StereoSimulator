@@ -81,18 +81,6 @@ try:
         depth_image = np.asanyarray(aligned_depth_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
 
-        # Remove background - Set pixels further than clipping_distance to grey
-        grey_color = 153
-        depth_image_3d = np.dstack((depth_image, depth_image, depth_image))  # depth image is 1 channel, color is 3 channels
-        # bg_removed = np.where((depth_image_3d > clipping_distance) | (depth_image_3d <= 0), grey_color, color_image)
-        bg_removed = color_image
-
-        # Render images:
-        #   depth align to color on left
-        #   depth on right
-        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
-        images = np.hstack((bg_removed, depth_colormap))
-
         # Save images every 30 frames
         if cnt % 30 == 0:
             color_image_filename = os.path.join(scene_name, f"color_image_{cnt // 30}.png")
@@ -105,7 +93,26 @@ try:
             print(f"Saved {color_image_filename} and {depth_image_filename}")
         cnt += 1
 
+
+        # Remove background - Set pixels further than clipping_distance to grey
+        grey_color = 153
+        depth_image_3d = np.dstack((depth_image, depth_image, depth_image))  # depth image is 1 channel, color is 3 channels
+        # bg_removed = np.where((depth_image_3d > clipping_distance) | (depth_image_3d <= 0), grey_color, color_image)
+        bg_removed = color_image
+
+        # Render images:
+        #   depth align to color on left
+        #   depth on right
+        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
+        # Resize bg_removed and depth_colormap to half resolution
+        bg_removed_resized = cv2.resize(bg_removed, (bg_removed.shape[1] // 2, bg_removed.shape[0] // 2))
+        depth_colormap_resized = cv2.resize(depth_colormap, (depth_colormap.shape[1] // 2, depth_colormap.shape[0] // 2))
+        # Stack the resized images side by side
+        images = np.vstack((bg_removed_resized, depth_colormap_resized))
+        # images = np.hstack((bg_removed, depth_colormap))
+
         cv2.namedWindow('Align Example', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Align Example', images.shape[1], images.shape[0])
         cv2.imshow('Align Example', images)
         key = cv2.waitKey(1)
         # Press esc or 'q' to close the image window
