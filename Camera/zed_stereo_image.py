@@ -22,8 +22,10 @@ def main():
     print("Camera Serial Number:", cam_info.serial_number)
 
     # Create image objects
-    raw_image = sl.Mat()
-    rectified_image = sl.Mat()
+    left_raw_image = sl.Mat()
+    left_rectified_image = sl.Mat()
+    right_raw_image = sl.Mat()
+    right_rectified_image = sl.Mat()
 
     # Set the runtime parameters (to retrieve images)
     runtime_parameters = sl.RuntimeParameters()
@@ -34,21 +36,29 @@ def main():
         # Grab an image from the camera
         if zed.grab(runtime_parameters) == sl.ERROR_CODE.SUCCESS:
             # Retrieve raw (uncalibrated) image
-            zed.retrieve_image(raw_image, sl.VIEW.LEFT_UNRECTIFIED)  # Use sl.VIEW_RIGHT for right camera
+            zed.retrieve_image(left_raw_image, sl.VIEW.LEFT_UNRECTIFIED)  # Use sl.VIEW_RIGHT for right camera
+            zed.retrieve_image(right_raw_image, sl.VIEW.RIGHT_UNRECTIFIED)  # Use sl.VIEW_RIGHT for right camera
 
             # Retrieve rectified image
-            zed.retrieve_image(rectified_image, sl.VIEW.LEFT)  # For rectified image
+            zed.retrieve_image(left_rectified_image, sl.VIEW.LEFT)  # For rectified image
+            zed.retrieve_image(right_rectified_image, sl.VIEW.RIGHT)  # For rectified image
 
             # Convert images to OpenCV format for display
-            raw_image_cv = raw_image.get_data()
-            rectified_image_cv = rectified_image.get_data()
+            left_raw_image_cv = left_raw_image.get_data()
+            left_rectified_image_cv = left_rectified_image.get_data()
+            right_raw_image_cv = right_raw_image.get_data()
+            right_rectified_image_cv = right_rectified_image.get_data()
 
             # Resize both images to 1/4 of their original size
-            raw_resized = cv2.resize(raw_image_cv, (0, 0), fx=0.25, fy=0.25)
-            rectified_resized = cv2.resize(rectified_image_cv, (0, 0), fx=0.25, fy=0.25)
+            left_raw_resized = cv2.resize(left_raw_image_cv, (0, 0), fx=0.25, fy=0.25)
+            left_rectified_resized = cv2.resize(left_rectified_image_cv, (0, 0), fx=0.25, fy=0.25)
+            right_raw_resized = cv2.resize(right_raw_image_cv, (0, 0), fx=0.25, fy=0.25)
+            right_rectified_resized = cv2.resize(right_rectified_image_cv, (0, 0), fx=0.25, fy=0.25)
 
             # Stack the images vertically
-            stacked_image = cv2.vconcat([raw_resized, rectified_resized])
+            left_stacked_image = cv2.vconcat([left_raw_resized, left_rectified_resized])
+            right_stacked_image = cv2.vconcat([right_raw_resized, right_rectified_resized])
+            stacked_image = cv2.hconcat([left_stacked_image, right_stacked_image])
 
             # Display the stacked image
             cv2.imshow("Raw and Rectified Images", stacked_image)
