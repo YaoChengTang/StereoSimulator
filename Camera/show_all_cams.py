@@ -13,12 +13,15 @@ from datetime import datetime
 def init_paths(args):
     # Create scene directory if it doesn't exist
     scene_name = args.scene_name  # Get the scene name from arguments
-    if not os.path.exists(scene_name):
-        os.makedirs(scene_name)
+    root = args.root
+    sv_dir = os.path.join(root, scene_name)
+    if not os.path.exists(sv_dir):
+        os.makedirs(sv_dir)
 
 def init_L515(args, enable_rgb=True, enable_depth=True): 
     # Get the scene name from arguments
     scene_name = args.scene_name
+    root = args.root
 
     # Create a pipeline
     pipeline = rs.pipeline()
@@ -87,7 +90,7 @@ def init_L515(args, enable_rgb=True, enable_depth=True):
     }
 
     # Save the data to YAML
-    with open(os.path.join(scene_name, 'L515_calib.yaml'), 'w') as file:
+    with open(os.path.join(root, scene_name, 'L515_calib.yaml'), 'w') as file:
         yaml.dump(data, file, default_flow_style=False)
 
     # Create an align object
@@ -102,6 +105,7 @@ def init_L515(args, enable_rgb=True, enable_depth=True):
 def init_zed(args):
     # Get the scene name from arguments
     scene_name = args.scene_name
+    root = args.root
 
     # Create a Camera object
     zed = sl.Camera()
@@ -162,25 +166,21 @@ def init_zed(args):
     print(data)
 
     # Save the data to YAML
-    with open(os.path.join(scene_name, 'ZED_calib.yaml'), 'w') as file:
+    with open(os.path.join(root, scene_name, 'ZED_calib.yaml'), 'w') as file:
         yaml.dump(data, file, default_flow_style=False)
 
     return zed
 
 
 def stack_images_centered(stacked_image, images):
-    # 获取两张图片的尺寸
     h1, w1 = stacked_image.shape[:2]
     h2, w2 = images.shape[:2]
     
-    # 计算目标高度和宽度
     max_height = max(h1, h2)
     total_width = w1 + w2
     
-    # 创建一个全零的画布，尺寸为合并后的大小
     result = np.zeros((max_height, total_width, 3), dtype=np.uint8)
     
-    # 将原始图像放置到画布上
     result[(max_height-h1)//2:(max_height-h1)//2 + h1, :w1] = stacked_image
     result[(max_height-h2)//2:(max_height-h2)//2 + h2, w1:w1+w2] = images
     
@@ -190,7 +190,8 @@ def stack_images_centered(stacked_image, images):
 
 def save_data(args, data, idx):
     scene_name = args.scene_name  # Get the scene name from arguments
-    sv_dir = os.path.join(scene_name, f"{idx:04d}")
+    root = args.root
+    sv_dir = os.path.join(root, scene_name, f"{idx:04d}")
     if not os.path.exists(sv_dir):
         os.makedirs(sv_dir)
     
@@ -223,6 +224,7 @@ def main(args):
     # runtime_parameters.sensing_mode = sl.SENSING_MODE_STANDARD  # Can also be set to `SENSING_MODE_DEPTH`
 
     try:
+        idx = 0
         cnt = 0
         while True:
         # for i in range(50):
@@ -297,6 +299,18 @@ def main(args):
                 # Display the stacked image
                 cv2.imshow("Raw and Rectified Images, RGB and Depth Images", vis_imgs)
 
+                cnt += 1
+                if args.auto_save and cnt % 30 == 0:
+                    data = {
+                        "L515_color_image": color_image,
+                        "L515_depth_image": depth_image,
+                        "zed_left_color_image": left_rectified_image_cv,
+                        "zed_right_color_image": right_rectified_image_cv,
+                    }
+                    save_data(args, data, idx)
+                    idx += 1
+                    cnt = 0
+
                 key = cv2.waitKey(1)
                 if key == ord('s'):  # Save image on pressing 's'
                     data = {
@@ -305,8 +319,8 @@ def main(args):
                         "zed_left_color_image": left_rectified_image_cv,
                         "zed_right_color_image": right_rectified_image_cv,
                     }
-                    save_data(args, data, cnt)
-                    cnt += 1
+                    save_data(args, data, idx)
+                    idx += 1
                 
                 elif key == ord('q'):  # Exit on pressing 'q'
                     print("Pressed 'q' key!")
@@ -325,7 +339,10 @@ def main(args):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="RealSense Stream")
-    parser.add_argument('--scene_name', type=str, default=datetime.now().strftime('%Y%m%d_%H%M%S'), help='Scene name for saving images')
+    parser.add_argument('--root', type=str, default="./Dataset", help='Dataset root')
+    parser.add_argument('--scene_name', type=str, default="", help='Scene name for saving images')
+    parser.add_argument('--auto_save', action='store_true', help='Save data automatically')
     args = parser.parse_args()
+    args.scene_name = f"{args.scene_name}" + "-"*(len(args.scene_name)>0) + datetime.now().strftime('%Y%m%d_%H%M%S')
 
     main(args)
