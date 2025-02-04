@@ -22,7 +22,16 @@ def stack_images_hor(stacked_image, images):
     max_height = max(h1, h2)
     total_width = w1 + w2
     
-    result = np.zeros((max_height, total_width, 3), dtype=np.uint8)
+    if len(stacked_image.shape)==3 or len(images.shape)==3:
+        channel = stacked_image.shape[2] if len(stacked_image.shape)==3 else images.shape[2]
+        result = np.zeros((max_height, total_width, channel), dtype=np.uint8)
+    else:
+        result = np.zeros((max_height, total_width), dtype=np.uint8)
+
+    if len(stacked_image.shape)==3 and len(images.shape)==2:
+        images = images[..., np.newaxis]
+    elif len(stacked_image.shape)==2 and len(images.shape)==3:
+        stacked_image = stacked_image[..., np.newaxis]
     
     result[(max_height-h1)//2:(max_height-h1)//2 + h1, :w1] = stacked_image
     result[(max_height-h2)//2:(max_height-h2)//2 + h2, w1:w1+w2] = images
@@ -37,7 +46,16 @@ def stack_images_ver(stacked_image, images):
     max_width = max(w1, w2)
     total_height = h1 + h2
     
-    result = np.zeros((total_height, max_width, 3), dtype=np.uint8)
+    if len(stacked_image.shape)==3 or len(images.shape)==3:
+        channel = stacked_image.shape[2] if len(stacked_image.shape)==3 else images.shape[2]
+        result = np.zeros((total_height, max_width, channel), dtype=np.uint8)
+    else:
+        result = np.zeros((total_height, max_width), dtype=np.uint8)
+
+    if len(stacked_image.shape)==3 and len(images.shape)==2:
+        images = images[..., np.newaxis]
+    elif len(stacked_image.shape)==2 and len(images.shape)==3:
+        stacked_image = stacked_image[..., np.newaxis]
     
     result[:h1, (max_width-w1)//2:(max_width-w1)//2 + w1] = stacked_image
     result[h1:h1+h2, (max_width-w2)//2:(max_width-w2)//2 + w2] = images
@@ -49,7 +67,12 @@ def stack_images_ver(stacked_image, images):
 def save_data(args, data, idx):
     scene_name = args.scene_name  # Get the scene name from arguments
     root = args.root
-    sv_dir = os.path.join(root, scene_name, f"{idx:04d}")
+    if type(idx) is int:
+        sv_dir = os.path.join(root, scene_name, f"{idx:04d}")
+    elif type(idx) is str:
+        sv_dir = os.path.join(root, scene_name, f"{idx}")
+    else:
+        raise Exception(f"No support for such type of idx: {type(idx)}")
     if not os.path.exists(sv_dir):
         os.makedirs(sv_dir)
     
@@ -82,6 +105,21 @@ def get_image_paths(root="./Dataset", scene_name="calib"):
 
     return left_img_paths, right_img_paths, rgb_img_paths, depth_img_paths
 
+
+def colorize_depth_rgb(depth_img, rgb_img):
+    # Normalize depth to 0-255 for better visualization
+    depth_img_normalized = cv2.normalize(depth_img, None, 0, 255, cv2.NORM_MINMAX)
+
+    # Apply a color map to the depth map for visualization
+    depth_img_colored = cv2.applyColorMap(depth_img_normalized.astype(np.uint8), cv2.COLORMAP_JET)
+
+    print("-"*10, rgb_img.shape, rgb_img.dtype, depth_img_colored.shape, depth_img_colored.dtype)
+
+    # Blend the depth map (as a color map) with the RGB image
+    alpha = 0.6  # Transparency for blending
+    overlay = cv2.addWeighted(rgb_img, 1 - alpha, depth_img_colored, alpha, 0)
+
+    return overlay
 
 
 def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T):
@@ -140,20 +178,40 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
     # Project the 3D points back onto the ZED image plane
     x_projected = (fx_ZED * points_3D_ZED[0] / points_3D_ZED[2]) + cx_ZED
     y_projected = (fy_ZED * points_3D_ZED[1] / points_3D_ZED[2]) + cy_ZED
-
-    # Filter out points that project outside the image bounds (negative or too large values)
-    valid = (x_projected >= 0) & (x_projected < W) & (y_projected >= 0) & (y_projected < H)
-    x_projected = x_projected[valid]
-    y_projected = y_projected[valid]
-    depth_projected = depth_flat[valid]
+    depth_projected = depth_flat
 
     # 4. Reconstruct the Depth Map on ZED's Left Image
-    # Create an empty depth map for ZED's left image
-    depth_map_ZED = np.zeros((H,W))
+    depth_map_ZED, invalid_mask = construct_geometry_target(x_projected, 
+                                                          y_projected, 
+                                                          depth_projected, 
+                                                          H, W)
+    return depth_map_ZED, invalid_mask
 
+
+def construct_geometry_target(x_projected, y_projected, depth_projected, H, W):
     # Round the projected coordinates to nearest integer pixels
     x_projected_int = np.round(x_projected).astype(int)
     y_projected_int = np.round(y_projected).astype(int)
+
+    # Assign depth map with minimum depth value
+    depth_map_ZED = assign_minimum_depth(x_projected_int, y_projected_int, depth_projected, H, W)
+
+    x_projected_int = np.concatenate([np.ceil(x_projected).astype(int), np.floor(x_projected).astype(int)])
+    y_projected_int = np.concatenate([np.ceil(y_projected).astype(int), np.floor(y_projected).astype(int)])
+    depth_projected_cat = np.concatenate([depth_projected, depth_projected])
+    depth_map_hole = assign_minimum_depth(x_projected_int, y_projected_int, depth_projected_cat, H, W)
+
+    depth_map_ZED[np.isinf(depth_map_ZED)] = 0
+    depth_map_hole[np.isinf(depth_map_hole)] = 0
+    depth_map_ZED = depth_map_ZED + (np.abs(depth_map_ZED)<np.finfo(np.float32).eps) * depth_map_hole
+
+    invalid_mask = np.abs(depth_map_ZED)<np.finfo(np.float32).eps
+
+    return depth_map_ZED, invalid_mask
+
+
+def assign_minimum_depth(x_projected_int, y_projected_int, depth_projected, H, W):
+    depth_map_ZED = np.zeros((H,W))
 
     # Filter out points that project outside the image bounds (negative or too large values)
     valid = (x_projected_int >= 0) & (x_projected_int < W) & (y_projected_int >= 0) & (y_projected_int < H)
@@ -166,10 +224,7 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
     # print(f"x_projected_int min: {x_projected_int.min()}, x_projected_int.max: {x_projected_int.max()} " +\
     #       f"y_projected_int min: {y_projected_int.min()}, y_projected_int.max: {y_projected_int.max()}")
 
-    # # Assign the depth values to the corresponding pixels in the ZED depth map
-    # depth_map_ZED[y_projected_int, x_projected_int] = depth_projected
-
-    # 5. Update depth map with the minimum depth for each pixel using NumPy operations (no loops)
+    # Assign depth map with the minimum depth for each pixel using NumPy operations (no loops)
     # Flatten the pixel coordinates to map them into a single index
     pixel_indices = np.ravel_multi_index((y_projected_int, x_projected_int), (H, W))
 
@@ -182,23 +237,40 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
     # Reshape depth_map_temp back to the image shape
     depth_map_ZED = depth_map_temp.reshape((H, W))
 
-    depth_map_ZED[depth_map_ZED == np.inf] = 0
-
-    # # Optionally: Apply filtering or interpolation to fill in any gaps (optional)
-    # depth_map_ZED = cv2.medianBlur(depth_map_ZED, 5)  # Optional, to smooth the depth map
+    # depth_map_ZED[depth_map_ZED == np.inf] = 0
 
     return depth_map_ZED
 
 
-def colorize_depth_rgb(depth_img, rgb_img):
-    # Normalize depth to 0-255 for better visualization
-    depth_img_normalized = cv2.normalize(depth_img, None, 0, 255, cv2.NORM_MINMAX)
+def repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=None, frame_idx=None):
+    img_depth_remap = img_depth_remap.astype(np.float32)
+    # img_depth_remap_dense = cv2.ximgproc.guidedFilter(guide=img_ZED, src=img_depth_remap, radius=16, eps=1000)
+    # img_depth_remap_dense = cv2.inpaint(img_depth_remap, invalid_mask_remap.astype(np.uint8), inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(invalid_mask_remap.astype(np.uint8) * 255, connectivity=8)
+    area_threshold = 100
+    areas = stats[1:, cv2.CC_STAT_AREA]   # Extract areas from stats (skip the first row, which is the background)
+    small_labels = np.where(areas <= area_threshold)[0] + 1  # Create a mask for labels with areas <= threshold. Adjust to 1-based labels
+    small_mask = np.isin(labels, small_labels).astype(np.uint8) * 255
+    img_depth_remap_dense = cv2.inpaint(img_depth_remap, small_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    invalid_mask_dense = np.abs(img_depth_remap_dense)<np.finfo(np.float32).eps
+    img_depth_remap_dense_smoothed = cv2.ximgproc.guidedFilter(
+        guide=img_ZED,
+        src=cv2.inpaint(img_depth_remap, invalid_mask_remap.astype(np.uint8), inpaintRadius=3, flags=cv2.INPAINT_TELEA).astype(np.float32),
+        radius=3,
+        eps=1e-3,
+    )
+    img_depth_remap_dense_smoothed = img_depth_remap_dense_smoothed * (~invalid_mask_dense)
+    img_depth_remap_repair = img_depth_remap * (~invalid_mask_remap) + img_depth_remap_dense_smoothed * invalid_mask_remap
 
-    # Apply a color map to the depth map for visualization
-    depth_img_colored = cv2.applyColorMap(depth_img_normalized.astype(np.uint8), cv2.COLORMAP_JET)
+    if hasattr(args, 'vis_debug') and args.vis_debug:
+        data = {
+            "img_depth_remap": img_depth_remap.astype(np.uint16),
+            "img_depth_remap_dense": img_depth_remap_dense.astype(np.uint16),
+            "img_depth_remap_dense_smoothed": img_depth_remap_dense_smoothed.astype(np.uint16),
+            "img_depth_remap_repair": img_depth_remap_repair.astype(np.uint16),
+        }
+        save_data(args, data, frame_idx)
 
-    # Blend the depth map (as a color map) with the RGB image
-    alpha = 0.6  # Transparency for blending
-    overlay = cv2.addWeighted(rgb_img, 1 - alpha, depth_img_colored, alpha, 0)
+    invalid_mask = np.abs(img_depth_remap_repair)<np.finfo(np.float32).eps
 
-    return overlay
+    return img_depth_remap_repair, invalid_mask

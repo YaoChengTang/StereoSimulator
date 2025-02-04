@@ -157,6 +157,34 @@ class ZedCalibration:
 
 
 
+class WarpCalibration:
+    def __init__(self, calib_file):
+        self.calib = {'R': {}, 'T': {}, 'E': {}, 'F': {}}
+        self._load_calib(calib_file)
+    
+    def _load_calib(self, calib_file):
+        with open(calib_file, 'r') as f:
+            calib_data = yaml.safe_load(f)
+        
+        self.calib['R'] = np.array(calib_data['R'])
+        self.calib['T'] = np.array(calib_data['T'])
+        self.calib['E'] = np.array(calib_data['E'])
+        self.calib['F'] = np.array(calib_data['F'])
+
+    def get_rotation(self):
+        return self.calib['R']
+
+    def get_translation(self):
+        return self.calib['T']
+
+    def get_essential(self):
+        return self.calib['E']
+
+    def get_fundamental(self):
+        return self.calib['F']
+
+
+
 if __name__ == "__main__":
     # Example usage
     calib = ZedCalibration('./Dataset/calib/Zed_calib.yaml')
