@@ -122,7 +122,8 @@ def colorize_depth_rgb(depth_img, rgb_img):
     return overlay
 
 
-def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T):
+def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T, 
+                       args=None, frame_idx=None):
     """
     Remap the L515 depth map (img_depth) to the ZED left image.
     
@@ -138,6 +139,11 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
     Returns:
         np.array: Depth map on ZED's left image.
     """
+    up_scale = 3
+    img_depth_raw = img_depth
+    img_depth = cv2.resize(img_depth, (0, 0), fx=up_scale, fy=up_scale, interpolation=cv2.INTER_NEAREST)
+    K_L515 = K_L515 * up_scale
+
     h, w = img_depth.shape
     H, W, _ = img_ZED.shape
     
@@ -185,6 +191,14 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
                                                           y_projected, 
                                                           depth_projected, 
                                                           H, W)
+    
+    if args is not None and hasattr(args, 'vis_debug') and args.vis_debug:
+        data = {
+            "img_depth_raw": img_depth_raw.astype(np.uint16),
+            "img_depth_up": img_depth.astype(np.uint16),
+        }
+        save_data(args, data, frame_idx)
+
     return depth_map_ZED, invalid_mask
 
 

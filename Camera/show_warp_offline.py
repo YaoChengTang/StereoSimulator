@@ -42,7 +42,9 @@ def main(args):
         img_depth = cv2.imread(depth_img_path, cv2.IMREAD_UNCHANGED)
 
         # Align depth map to ZED left camera
-        img_depth_remap, invalid_mask_remap = remap_depth_to_zed(img_depth*depth_scale, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T)
+        img_depth_remap, invalid_mask_remap = remap_depth_to_zed(img_depth*depth_scale, img_ZED, 
+                                                                 K_L515, dist_L515, K_ZED, dist_ZED, R, T, 
+                                                                 args=args, frame_idx=frame_idx)
         img_depth_remap = img_depth_remap / depth_scale
         print(f"{scenename}-{frame_idx}\r\n" + \
               f"img_L515: {img_L515.shape}, img_ZED: {img_ZED.shape}, " + \
