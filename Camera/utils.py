@@ -106,23 +106,32 @@ def get_image_paths(root="./Dataset", scene_name="calib"):
     return left_img_paths, right_img_paths, rgb_img_paths, depth_img_paths
 
 
-def colorize_depth_rgb(depth_img, rgb_img):
-    # Normalize depth to 0-255 for better visualization
-    depth_img_normalized = cv2.normalize(depth_img, None, 0, 255, cv2.NORM_MINMAX)
+def colorize_depth_rgb(depth_img, rgb_img=None, color_type="mix"):
+    if color_type in ["single", "both"]:
+        vis = cv2.applyColorMap(cv2.convertScaleAbs(depth_img, alpha=0.03), cv2.COLORMAP_JET)
 
-    # Apply a color map to the depth map for visualization
-    depth_img_colored = cv2.applyColorMap(depth_img_normalized.astype(np.uint8), cv2.COLORMAP_JET)
+    if color_type in ["mix", "both"]:
+        # Normalize depth to 0-255 for better visualization
+        depth_img_normalized = cv2.normalize(depth_img, None, 0, 255, cv2.NORM_MINMAX)
 
-    # print("-"*10, rgb_img.shape, rgb_img.dtype, depth_img_colored.shape, depth_img_colored.dtype)
+        # Apply a color map to the depth map for visualization
+        depth_img_colored = cv2.applyColorMap(depth_img_normalized.astype(np.uint8), cv2.COLORMAP_JET)
 
-    # Blend the depth map (as a color map) with the RGB image
-    alpha = 0.6  # Transparency for blending
-    overlay = cv2.addWeighted(rgb_img, 1 - alpha, depth_img_colored, alpha, 0)
+        # print("-"*10, rgb_img.shape, rgb_img.dtype, depth_img_colored.shape, depth_img_colored.dtype)
 
-    return overlay
+        # Blend the depth map (as a color map) with the RGB image
+        alpha = 0.6  # Transparency for blending
+        overlay = cv2.addWeighted(rgb_img, 1 - alpha, depth_img_colored, alpha, 0)
+
+        if color_type=="mix":
+            vis = overlay
+        else:
+            vis = stack_images_ver(overlay, vis)
+
+    return vis
 
 
-def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T, 
+def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T, depth_scale, 
                        args=None, frame_idx=None):
     """
     Remap the L515 depth map (img_depth) to the ZED left image.
@@ -139,6 +148,10 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
     Returns:
         np.array: Depth map on ZED's left image.
     """
+    # Rescale to meters
+    img_depth = img_depth * depth_scale
+
+    # Upsample the source depth map to avoid misassignment of depth from BG to FG due to the sparsity after the warping
     up_scale = 3
     img_depth_raw = img_depth
     img_depth = cv2.resize(img_depth, (0, 0), fx=up_scale, fy=up_scale, interpolation=cv2.INTER_NEAREST)
@@ -184,18 +197,21 @@ def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R
     # Project the 3D points back onto the ZED image plane
     x_projected = (fx_ZED * points_3D_ZED[0] / points_3D_ZED[2]) + cx_ZED
     y_projected = (fy_ZED * points_3D_ZED[1] / points_3D_ZED[2]) + cy_ZED
-    depth_projected = depth_flat
+    depth_projected = points_3D_ZED[2]
 
     # 4. Reconstruct the Depth Map on ZED's Left Image
     depth_map_ZED, invalid_mask = construct_geometry_target(x_projected, 
                                                           y_projected, 
                                                           depth_projected, 
                                                           H, W)
+
+    # Rescale to original scale
+    depth_map_ZED = depth_map_ZED / depth_scale
     
     if args is not None and hasattr(args, 'vis_debug') and args.vis_debug:
         data = {
-            "img_depth_raw": img_depth_raw.astype(np.uint16),
-            "img_depth_up": img_depth.astype(np.uint16),
+            "img_depth_raw": (img_depth_raw / depth_scale).astype(np.uint16),
+            "img_depth_up": (img_depth / depth_scale).astype(np.uint16),
         }
         save_data(args, data, frame_idx)
 
@@ -207,7 +223,7 @@ def construct_geometry_target(x_projected, y_projected, depth_projected, H, W):
     x_projected_int = np.round(x_projected).astype(int)
     y_projected_int = np.round(y_projected).astype(int)
 
-    # Assign depth map with minimum depth value
+    # Assign depth map with minimum depth value, Z-Buffer
     depth_map_ZED = assign_minimum_depth(x_projected_int, y_projected_int, depth_projected, H, W)
 
     x_projected_int = np.concatenate([np.ceil(x_projected).astype(int), np.floor(x_projected).astype(int)])
@@ -219,7 +235,7 @@ def construct_geometry_target(x_projected, y_projected, depth_projected, H, W):
     depth_map_hole[np.isinf(depth_map_hole)] = 0
     depth_map_ZED = depth_map_ZED + (np.abs(depth_map_ZED) < np.finfo(np.float32).eps) * depth_map_hole
 
-    invalid_mask = np.abs(depth_map_ZED)<np.finfo(np.float32).eps
+    invalid_mask = np.abs(depth_map_ZED) < np.finfo(np.float32).eps
 
     return depth_map_ZED, invalid_mask
 
@@ -288,6 +304,85 @@ def repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=None, frame_
     invalid_mask = np.abs(img_depth_remap_repair)<np.finfo(np.float32).eps
 
     return img_depth_remap_repair, invalid_mask
+
+
+
+def build_invalid_areas(depth_ZED, depth_L515, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T, depth_scale,
+                         args=None, frame_idx=None):
+    """
+    Remap the depth map from ZED left image to L515 image, and detect the points located at the invalid areas in L515.
+    
+    Parameters:
+        depth_L515 (np.array): The depth map from the L515 (height x width).
+        depth_ZED (np.array): The depth map from the ZED (Height x Width).
+        K_L515 (np.array): Intrinsic matrix for L515.
+        dist_L515 (np.array): Distortion coefficients for L515.
+        K_ZED (np.array): Intrinsic matrix for ZED's left camera.
+        dist_ZED (np.array): Distortion coefficients for ZED's left camera.
+        R (np.array): Rotation matrix from L515 to ZED.
+        T (np.array): Translation vector from L515 to ZED.
+        
+    Returns:
+        np.array: Invalid mask on ZED's left image.
+    """
+    # Rescale to meters
+    depth_ZED = depth_ZED * depth_scale
+    depth_L515 = depth_L515 * depth_scale
+
+    h, w = depth_L515.shape
+    H, W = depth_ZED.shape
+    
+    # Create mesh grid for pixel coordinates
+    x, y = np.meshgrid(np.arange(W), np.arange(H))
+    
+    # Flatten the pixel coordinates
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+    depth_ZED_flat = depth_ZED.flatten()
+
+    # 1. Project Depth Points to 3D (in ZED camera coordinate system)
+    # Convert pixel coordinates to normalized camera coordinates (in ZED camera frame)
+    fx_ZED, fy_ZED = K_ZED[0, 0], K_ZED[1, 1]
+    cx_ZED, cy_ZED = K_ZED[0, 2], K_ZED[1, 2]
+    
+    X_ZED = (x_flat - cx_ZED) * depth_ZED_flat / fx_ZED
+    Y_ZED = (y_flat - cy_ZED) * depth_ZED_flat / fy_ZED
+    Z_ZED = depth_ZED_flat  # Depth values are in meters
+
+    # Stack the 3D points (in ZED camera coordinate system)
+    points_3D_ZED = np.vstack((X_ZED, Y_ZED, Z_ZED))
+
+    # 2. Transform 3D Points to L515's Coordinate System
+    # Apply the extrinsic transformation: ZED = R * L515 + T -> L515 = R^{-1}(ZED - T)
+    if len(T.shape)==1:
+        T = T[:, np.newaxis]
+    points_3D_L515 = np.linalg.inv(R) @ (points_3D_ZED - T)
+
+    # 3. Project 3D Points onto L515's Left Image
+    fx_L515, fy_L515 = K_L515[0, 0], K_L515[1, 1]
+    cx_L515, cy_L515 = K_L515[0, 2], K_L515[1, 2]
+    
+    # Project the 3D points back onto the L515 image plane
+    x_projected = (fx_L515 * points_3D_L515[0] / points_3D_L515[2]) + cx_L515
+    y_projected = (fy_L515 * points_3D_L515[1] / points_3D_L515[2]) + cy_L515
+
+    # 4. Detect the points located at the invalid areas in L515
+    x_projected_int = np.round(x_projected).astype(int)
+    y_projected_int = np.round(y_projected).astype(int)
+    inside_img_mask = (x_projected_int >= 0) & (x_projected_int < w) & (y_projected_int >= 0) & (y_projected_int < h)
+
+    chs_x_projected_int, chs_y_projected_int = x_projected_int[inside_img_mask], y_projected_int[inside_img_mask]
+    chs_x_flat, chs_y_flat = x_flat[inside_img_mask], y_flat[inside_img_mask]
+
+    depth_ZED_final = depth_ZED.copy()
+    invalid_mask = np.abs(depth_L515[chs_y_projected_int, chs_x_projected_int]) < np.finfo(np.float32).eps
+    depth_ZED_final[chs_y_flat, chs_x_flat] = depth_ZED_final[chs_y_flat, chs_x_flat] * (~invalid_mask)
+    invalid_mask = np.abs(depth_ZED_final) < np.finfo(np.float32).eps
+
+    # Rescale to original scale
+    depth_ZED_final = depth_ZED_final / depth_scale
+
+    return depth_ZED_final, invalid_mask
 
 
 
