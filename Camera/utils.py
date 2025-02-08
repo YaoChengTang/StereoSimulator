@@ -417,20 +417,30 @@ def repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=None, frame_
     img_depth_remap = img_depth_remap.astype(np.float32)
     # img_depth_remap_dense = cv2.ximgproc.guidedFilter(guide=img_ZED, src=img_depth_remap, radius=16, eps=1000)
     # img_depth_remap_dense = cv2.inpaint(img_depth_remap, invalid_mask_remap.astype(np.uint8), inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+
+    # Detect small invalid areas
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(invalid_mask_remap.astype(np.uint8) * 255, connectivity=8)
     area_threshold = 100
     areas = stats[1:, cv2.CC_STAT_AREA]   # Extract areas from stats (skip the first row, which is the background)
     small_labels = np.where(areas <= area_threshold)[0] + 1  # Create a mask for labels with areas <= threshold. Adjust to 1-based labels
     small_mask = np.isin(labels, small_labels).astype(np.uint8) * 255
-    img_depth_remap_dense = cv2.inpaint(img_depth_remap, small_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-    invalid_mask_dense = np.abs(img_depth_remap_dense) < np.finfo(np.float32).eps
+
+    # Inpaint for all invalid areas and small invalid areas.
+    # Actually, we only use inpainting on small invalid areas, since inpainting on large invalid regions can produce artifacts.
+    # We also use inpainting on all invalid areas, as guided filter is prone to noise and large invalid regions will bring much noise.
+    img_depth_remap_dense_all = cv2.inpaint(img_depth_remap, invalid_mask_remap.astype(np.uint8), inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    img_depth_remap_dense_small = cv2.inpaint(img_depth_remap, small_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    invalid_mask_dense_large = np.abs(img_depth_remap_dense_small) < np.finfo(np.float32).eps
+
+    # Make the results smooth
     img_depth_remap_dense_smoothed = cv2.ximgproc.guidedFilter(
         guide=img_ZED,
-        src=cv2.inpaint(img_depth_remap, invalid_mask_remap.astype(np.uint8), inpaintRadius=3, flags=cv2.INPAINT_TELEA).astype(np.float32),
-        radius=3,
+        src=img_depth_remap_dense_all.astype(np.float32),
+        radius=5,
         eps=1e-3,
     )
-    img_depth_remap_dense_smoothed = img_depth_remap_dense_smoothed * (~invalid_mask_dense)
+    # Only update the results on small invalid areas
+    img_depth_remap_dense_smoothed = img_depth_remap_dense_smoothed * (~invalid_mask_dense_large)
     img_depth_remap_repair = img_depth_remap * (~invalid_mask_remap) + img_depth_remap_dense_smoothed * invalid_mask_remap
 
     if hasattr(args, 'vis_debug') and args.vis_debug:
