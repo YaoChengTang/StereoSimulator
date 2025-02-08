@@ -113,7 +113,7 @@ def colorize_depth_rgb(depth_img, rgb_img):
     # Apply a color map to the depth map for visualization
     depth_img_colored = cv2.applyColorMap(depth_img_normalized.astype(np.uint8), cv2.COLORMAP_JET)
 
-    print("-"*10, rgb_img.shape, rgb_img.dtype, depth_img_colored.shape, depth_img_colored.dtype)
+    # print("-"*10, rgb_img.shape, rgb_img.dtype, depth_img_colored.shape, depth_img_colored.dtype)
 
     # Blend the depth map (as a color map) with the RGB image
     alpha = 0.6  # Transparency for blending
@@ -217,7 +217,7 @@ def construct_geometry_target(x_projected, y_projected, depth_projected, H, W):
 
     depth_map_ZED[np.isinf(depth_map_ZED)] = 0
     depth_map_hole[np.isinf(depth_map_hole)] = 0
-    depth_map_ZED = depth_map_ZED + (np.abs(depth_map_ZED)<np.finfo(np.float32).eps) * depth_map_hole
+    depth_map_ZED = depth_map_ZED + (np.abs(depth_map_ZED) < np.finfo(np.float32).eps) * depth_map_hole
 
     invalid_mask = np.abs(depth_map_ZED)<np.finfo(np.float32).eps
 
@@ -266,7 +266,7 @@ def repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=None, frame_
     small_labels = np.where(areas <= area_threshold)[0] + 1  # Create a mask for labels with areas <= threshold. Adjust to 1-based labels
     small_mask = np.isin(labels, small_labels).astype(np.uint8) * 255
     img_depth_remap_dense = cv2.inpaint(img_depth_remap, small_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-    invalid_mask_dense = np.abs(img_depth_remap_dense)<np.finfo(np.float32).eps
+    invalid_mask_dense = np.abs(img_depth_remap_dense) < np.finfo(np.float32).eps
     img_depth_remap_dense_smoothed = cv2.ximgproc.guidedFilter(
         guide=img_ZED,
         src=cv2.inpaint(img_depth_remap, invalid_mask_remap.astype(np.uint8), inpaintRadius=3, flags=cv2.INPAINT_TELEA).astype(np.float32),
@@ -288,3 +288,74 @@ def repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=None, frame_
     invalid_mask = np.abs(img_depth_remap_repair)<np.finfo(np.float32).eps
 
     return img_depth_remap_repair, invalid_mask
+
+
+
+def save_ply(rgb_image, depth_image, depth_scale, intrinsics, file_name, args=None, frame_idx=None):
+    # Get the height and width of the image
+    H, W, _ = rgb_image.shape
+    
+    # Convert depth image to real-world depth values (in meters)
+    depth = depth_image * depth_scale  # Depth in meters
+    
+    # Create meshgrid for pixel coordinates (u, v)
+    u, v = np.meshgrid(np.arange(W), np.arange(H))  # u is the column, v is the row
+    
+    # Create mask for valid depth values (non-zero)
+    valid_mask = depth > 0
+    
+    # Compute 3D coordinates (X, Y, Z) using the intrinsic matrix
+    # Intrinsics matrix: K = [f_x, 0, c_x; 0, f_y, c_y; 0, 0, 1]
+    f_x, f_y, c_x, c_y = intrinsics[0,0], intrinsics[1,1], intrinsics[0,2], intrinsics[1,2]
+    
+    # Transform pixel coordinates (u, v) into normalized camera coordinates
+    x = (u - c_x) * depth / f_x
+    y = (v - c_y) * depth / f_y
+    z = depth
+    
+    # Filter out invalid depth values
+    x = x[valid_mask]
+    y = y[valid_mask]
+    z = z[valid_mask]
+    
+    # Extract RGB values and filter based on valid depth mask
+    R = rgb_image[:, :, 0][valid_mask]  # Red channel
+    G = rgb_image[:, :, 1][valid_mask]  # Green channel
+    B = rgb_image[:, :, 2][valid_mask]  # Blue channel
+    
+    # Combine XYZ coordinates and RGB colors into a single array
+    points = np.vstack([x, y, z, R, G, B]).T
+    
+    # Build the save path
+    scene_name = args.scene_name  # Get the scene name from arguments
+    root = args.root
+    if type(frame_idx) is int:
+        sv_dir = os.path.join(root, scene_name, f"{frame_idx:04d}")
+    elif type(frame_idx) is str:
+        sv_dir = os.path.join(root, scene_name, f"{frame_idx}")
+    else:
+        raise Exception(f"No support for such type of frame_idx: {type(frame_idx)}")
+    if not os.path.exists(sv_dir):
+        os.makedirs(sv_dir)
+    sv_path = os.path.join(sv_dir, file_name)
+
+    # Write point cloud to .ply format using numpy.savetxt (faster than looping)
+    header = (
+        f"ply\n"
+        f"format ascii 1.0\n"
+        f"element vertex {points.shape[0]}\n"
+        f"property float x\n"
+        f"property float y\n"
+        f"property float z\n"
+        f"property uchar red\n"
+        f"property uchar green\n"
+        f"property uchar blue\n"
+        f"end_header\n"
+    )
+    
+    # Open the file and write the header
+    with open(sv_path, 'w') as f:
+        f.write(header)
+        # Write all points at once using numpy.savetxt
+        np.savetxt(f, points, fmt='%f %f %f %d %d %d')
+    print(f"Saved {sv_path}")

@@ -8,7 +8,8 @@ import pyrealsense2 as rs
 
 from PIL import Image
 from datetime import datetime
-from utils import get_image_paths, stack_images_hor, stack_images_ver, colorize_depth_rgb, save_data
+from utils import get_image_paths, stack_images_hor, stack_images_ver, colorize_depth_rgb
+from utils import save_data, save_ply
 from utils import remap_depth_to_zed, repair_depth
 from calibration import ZedCalibration, L515Calibration, WarpCalibration
 
@@ -46,15 +47,17 @@ def main(args):
                                                                  K_L515, dist_L515, K_ZED, dist_ZED, R, T, 
                                                                  args=args, frame_idx=frame_idx)
         img_depth_remap = img_depth_remap / depth_scale
-        print(f"{scenename}-{frame_idx}\r\n" + \
-              f"img_L515: {img_L515.shape}, img_ZED: {img_ZED.shape}, " + \
-              f"img_depth: {img_depth.shape}, img_depth_remap: {img_depth_remap.shape} \r\n" + \
-              f"img_depth max: {img_depth.max()}, img_depth min: {img_depth.min()} ")
+        # print(f"{scenename}-{frame_idx}\r\n" + \
+        #       f"img_L515: {img_L515.shape}, img_ZED: {img_ZED.shape}, " + \
+        #       f"img_depth: {img_depth.shape}, img_depth_remap: {img_depth_remap.shape} \r\n" + \
+        #       f"img_depth max: {img_depth.max()}, img_depth min: {img_depth.min()} ")
 
         # Desitify the aligned depth map
         img_depth_remap_repair, invalid_mask_remap_mask = repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=args, frame_idx=frame_idx)
         img_depth_remap_repair = img_depth_remap_repair.astype(np.uint16)
 
+
+        # Visualization
         img_L515_resized = cv2.resize(img_L515, (0, 0), fx=0.25, fy=0.25)
         img_ZED_resized = cv2.resize(img_ZED, (0, 0), fx=0.25, fy=0.25)
         vis_img = stack_images_hor(img_L515_resized, img_ZED_resized)
@@ -97,6 +100,21 @@ def main(args):
 
 
 
+        # Save the final depth map for ZED left camera
+        data = {
+            "zed_depth_image": img_depth_remap_repair.astype(np.uint16),
+        }
+        save_data(args, data, frame_idx)
+
+        # Save point cloud with RGB
+        if args.sv_ply:
+            save_ply(img_L515, img_depth, depth_scale, K_L515, 
+                     "L515.ply", args=args, frame_idx=frame_idx)
+            save_ply(img_ZED, img_depth_remap_repair, depth_scale, K_ZED, 
+                     "ZED.ply", args=args, frame_idx=frame_idx)
+
+
+
 
 if __name__ == "__main__":
     # Parse command line arguments
@@ -104,6 +122,7 @@ if __name__ == "__main__":
     parser.add_argument('--root', type=str, default="./Dataset", help='Dataset root')
     parser.add_argument('--scene_name', type=str, default=datetime.now().strftime('%Y%m%d_%H%M%S'), help='Scene name for saving images')
     parser.add_argument('--vis_debug', action='store_true', help='Save visualization for debug')
+    parser.add_argument('--sv_ply', action='store_true', help='Save point cloud with RGB')
     args = parser.parse_args()
 
     args.root = "./Dataset"
