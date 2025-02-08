@@ -63,6 +63,131 @@ def stack_images_ver(stacked_image, images):
     return result
 
 
+def stack_images(image_list, placeholder_size=None, orientation='horizontal'):
+    """
+    Stacks a list of images either horizontally or vertically, centering them along the
+    perpendicular axis. For any None in the list, a placeholder image (filled with zeros)
+    is created.
+    
+    If placeholder_size is None, then:
+      - For horizontal stacking, the placeholder width is set to the maximum valid width.
+      - For vertical stacking, the placeholder height is set to the maximum valid height.
+    
+    Parameters:
+        image_list (list of np.ndarray or None): List of images to stack. Each image can be
+            grayscale (2D array) or color (3D array).
+        placeholder_size (int or None): For horizontal stacking, this value is used as the placeholder's width;
+            for vertical stacking, it is used as the placeholder's height. If None, the value defaults to
+            max(valid_widths) for horizontal or max(valid_heights) for vertical stacking.
+        orientation (str): Either 'horizontal' or 'vertical', controlling the stacking direction.
+    
+    Returns:
+        np.ndarray: The resulting stacked image.
+                    Returns None if image_list is empty.
+    """
+    if not image_list:
+        return None
+
+    # Determine if any valid image is color and collect valid dimensions.
+    is_color = False
+    valid_heights = []
+    valid_widths = []
+    for img in image_list:
+        if img is not None:
+            h, w = img.shape[:2]
+            valid_heights.append(h)
+            valid_widths.append(w)
+            if len(img.shape) == 3:
+                is_color = True
+
+    # Define default dimensions based on valid images.
+    default_height = max(valid_heights) if valid_heights else 100
+    default_width = max(valid_widths) if valid_widths else 100
+
+    # Use default placeholder_size if not provided.
+    if placeholder_size is None:
+        if orientation == 'horizontal':
+            placeholder_size = default_width
+        elif orientation == 'vertical':
+            placeholder_size = default_height
+        else:
+            raise ValueError("Orientation must be either 'horizontal' or 'vertical'")
+
+    # Compute canvas dimensions.
+    if orientation == 'horizontal':
+        canvas_height = default_height
+        # For each image, if None, use placeholder_size as width.
+        widths = [img.shape[1] if img is not None else placeholder_size for img in image_list]
+        canvas_width = sum(widths)
+    elif orientation == 'vertical':
+        canvas_width = default_width
+        # For each image, if None, use placeholder_size as height.
+        heights = [img.shape[0] if img is not None else placeholder_size for img in image_list]
+        canvas_height = sum(heights)
+    else:
+        raise ValueError("Orientation must be either 'horizontal' or 'vertical'")
+
+    # Determine number of channels for the output.
+    channels = 1
+    if is_color:
+        for img in image_list:
+            if img is not None and len(img.shape) == 3:
+                channels = img.shape[2]
+                break
+
+    # Process the image list by replacing None with a placeholder image.
+    processed_images = []
+    for img in image_list:
+        if img is None:
+            # Create a placeholder image with all zeros.
+            if orientation == 'horizontal':
+                # Placeholder shape: (canvas_height, placeholder_size, channels) for color,
+                # or (canvas_height, placeholder_size) for grayscale.
+                if is_color:
+                    placeholder = np.zeros((canvas_height, placeholder_size, channels), dtype=np.uint8)
+                else:
+                    placeholder = np.zeros((canvas_height, placeholder_size), dtype=np.uint8)
+            else:  # vertical orientation
+                # Placeholder shape: (placeholder_size, canvas_width, channels) for color,
+                # or (placeholder_size, canvas_width) for grayscale.
+                if is_color:
+                    placeholder = np.zeros((placeholder_size, canvas_width, channels), dtype=np.uint8)
+                else:
+                    placeholder = np.zeros((placeholder_size, canvas_width), dtype=np.uint8)
+            processed_images.append(placeholder)
+        else:
+            # If the overall output is color but the current image is grayscale, convert it.
+            if is_color and len(img.shape) == 2:
+                img = np.repeat(img[..., np.newaxis], channels, axis=2)
+            processed_images.append(img)
+
+    # Create a blank canvas for the result.
+    if is_color:
+        result = np.zeros((canvas_height, canvas_width, channels), dtype=np.uint8)
+    else:
+        result = np.zeros((canvas_height, canvas_width), dtype=np.uint8)
+
+    # Place each image onto the canvas.
+    if orientation == 'horizontal':
+        current_x = 0
+        for img in processed_images:
+            h, w = img.shape[:2]
+            # Compute vertical offset to center the image.
+            y_offset = (canvas_height - h) // 2
+            result[y_offset:y_offset+h, current_x:current_x+w] = img
+            current_x += w
+    else:  # vertical stacking
+        current_y = 0
+        for img in processed_images:
+            h, w = img.shape[:2]
+            # Compute horizontal offset to center the image.
+            x_offset = (canvas_width - w) // 2
+            result[current_y:current_y+h, x_offset:x_offset+w] = img
+            current_y += h
+
+    return result
+    
+
 
 def save_data(args, data, idx):
     scene_name = args.scene_name  # Get the scene name from arguments
