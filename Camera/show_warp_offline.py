@@ -10,7 +10,7 @@ from PIL import Image
 from datetime import datetime
 from utils import get_image_paths, stack_images_hor, stack_images_ver, stack_images, colorize_depth_rgb
 from utils import save_data, save_ply
-from utils import remap_depth_to_zed, repair_depth, build_invalid_areas
+from utils import remap_depth_to_zed, repair_depth, build_invalid_areas, detect_noise_in_depth
 from calibration import ZedCalibration, L515Calibration, WarpCalibration
 
 
@@ -55,11 +55,18 @@ def main(args):
         img_depth_remap_repair, invalid_mask_remap_repair = repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=args, frame_idx=frame_idx)
         # img_depth_remap_repair = img_depth_remap_repair.astype(np.uint16)
 
+        # Recheck invalid areas by remapping depth from ZED to L515
         img_depth_ivlarea, invalid_mask_ivlarea = build_invalid_areas(img_depth_remap_repair, img_depth, img_ZED, 
                                                               K_L515, dist_L515, K_ZED, dist_ZED, R, T, depth_scale, 
                                                               args=args, frame_idx=frame_idx)
 
-        img_depth_zed, img_depth_invalid_zed = img_depth_ivlarea, invalid_mask_ivlarea
+        # Rreduce the noise points
+        img_depth_lownoise, invalid_mask_lownoise = detect_noise_in_depth(img_depth_ivlarea, img_ZED, invalid_mask_ivlarea, depth_scale,
+                                                                          noise_threshold=0.03, kernel_size=5, 
+                                                                          edge_threshold=3, min_region_area=100, 
+                                                                          args=args, frame_idx=frame_idx)
+
+        img_depth_zed, img_depth_invalid_zed = img_depth_lownoise, invalid_mask_lownoise
 
         # Visualization
         vis_scale = 0.25
@@ -97,7 +104,6 @@ def main(args):
         cv2.imshow(f"{scenename}-{frame_idx}", vis_img)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
-        # break
 
         # Save the final depth map for ZED left camera
         data = {
@@ -113,6 +119,7 @@ def main(args):
             save_ply(img_ZED, img_depth_remap_repair, depth_scale, K_ZED, 
                      "ZED.ply", args=args, frame_idx=frame_idx)
 
+        break
 
 
 

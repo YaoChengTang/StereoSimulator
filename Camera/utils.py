@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 
 from datetime import datetime
+from scipy.ndimage import median_filter, sobel, label
 
 
 
@@ -446,7 +447,8 @@ def repair_depth(img_depth_remap, invalid_mask_remap, img_ZED, args=None, frame_
     if hasattr(args, 'vis_debug') and args.vis_debug:
         data = {
             "img_depth_remap": img_depth_remap.astype(np.uint16),
-            "img_depth_remap_dense": img_depth_remap_dense.astype(np.uint16),
+            "img_depth_remap_dense_all": img_depth_remap_dense_all.astype(np.uint16),
+            "img_depth_remap_dense_small": img_depth_remap_dense_small.astype(np.uint16),
             "img_depth_remap_dense_smoothed": img_depth_remap_dense_smoothed.astype(np.uint16),
             "img_depth_remap_repair": img_depth_remap_repair.astype(np.uint16),
         }
@@ -582,6 +584,117 @@ def build_invalid_areas(depth_ZED, depth_L515, img_L515,
 
 
 
+def detect_noise_in_depth(depth_image, rgb_image, invalid_mask, depth_scale=1.0, 
+                        noise_threshold=0.1, kernel_size=3, edge_threshold=0.5, min_region_area=100,
+                        args=None, frame_idx=0):
+    """
+    Detect noise points in depth map using local statistics and RGB image edges.
+    Apply morphological operations and connected components analysis to refine the noise removal.
+
+    Args:
+        depth_image (numpy array): Input depth map (H x W).
+        rgb_image (numpy array): Corresponding RGB image (H x W x 3).
+        invalid_mask (numpy array): Binary mask indicating invalid regions in depth map (H x W).
+        depth_scale (float): The scale factor to convert depth values to meters.
+        noise_threshold (float): Threshold for depth difference for detecting noise.
+        kernel_size (int): Size of the kernel for local filtering (e.g., 3 for 3x3).
+        edge_threshold (float): Threshold for RGB edge detection to assist noise removal.
+        min_region_area (int): Minimum area of a connected component to be kept.
+
+    Returns:
+        noise_map (numpy array): Binary noise map (H x W) where 1 indicates noise.
+        cleaned_depth (numpy array): Depth map after removing or correcting noise.
+    """
+    # Step 1: Convert depth_image to meters using depth_scale
+    depth_image_in_meters = depth_image * depth_scale
+
+    # Step 2: Mask out invalid regions using np.ma.masked_array
+    # Mask invalid regions so that they won't affect median filtering
+    depth_masked = np.ma.masked_array(depth_image_in_meters, mask=invalid_mask)
+
+    # Apply median filter while ignoring invalid regions
+    depth_smooth = median_filter(depth_masked, size=kernel_size)
+
+    # Step 3: Calculate the difference between the original and smoothed depth map
+    depth_diff = np.abs(depth_image_in_meters - depth_smooth)
+
+    # Step 4: Create initial noise map by thresholding depth differences
+    noise_map = (depth_diff > noise_threshold).astype(np.uint8)
+    refined_noise_map = noise_map
+
+
+    # # Step 5: Compute edges in RGB image (using Sobel edge detection)
+    # gray_rgb = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
+    # edges_rgb = sobel(gray_rgb)
+
+    # # Step 6: Threshold edges to get a binary edge map
+    # edges_map = (edges_rgb > edge_threshold).astype(np.uint8)
+
+    # # Step 7: Refine the noise map using RGB edge information, ignoring invalid regions
+    # refined_noise_map = np.logical_and(noise_map, 1 - edges_map).astype(np.uint8)
+    # refined_noise_map[invalid_mask == 1] = 0  # Ignore invalid regions in refined noise map
+
+    # # Step 8: Morphological opening and closing to remove small noise regions
+    # kernel = np.ones((5, 5), np.uint8)  # Structuring element
+    # refined_noise_map = cv2.morphologyEx(refined_noise_map, cv2.MORPH_OPEN, kernel)
+    # refined_noise_map = cv2.morphologyEx(refined_noise_map, cv2.MORPH_CLOSE, kernel)
+
+    # # Step 9: Connected components analysis to remove small regions based on minimum area
+    # num_labels, labels = label(refined_noise_map)
+    # unique_labels, region_areas = np.unique(labels, return_counts=True)
+
+    # # Skip the background label (which is 0)
+    # non_zero_labels = unique_labels[unique_labels != 0]
+    # non_zero_region_areas = region_areas[unique_labels != 0]
+
+    # # Use boolean mask to remove small regions
+    # small_regions = np.isin(labels, non_zero_labels[non_zero_region_areas < min_region_area])
+    # refined_noise_map[small_regions] = 0
+
+
+    # Step 10: Remove noise points by replacing them with the median of their neighbors, ignoring invalid regions
+    cleaned_depth = depth_image_in_meters.copy()
+    noise_mask = refined_noise_map == 1  # Binary mask for noise points
+
+    cleaned_depth[noise_mask] = 0
+    invalid_mask = np.abs(cleaned_depth) < np.finfo(np.float32).eps
+
+    if args is not None and hasattr(args, 'vis_debug') and args.vis_debug:
+        data = {
+            "denoise_depth_smooth": (depth_smooth/depth_scale).astype(np.uint16),
+            "denoise_noise_map": noise_map.astype(np.uint8)*255,
+            "denoise_edges_map": edges_map.astype(np.uint8)*255,
+            "denoise_refined_noise_map": refined_noise_map.astype(np.uint8)*255,
+            # "denoise_cleaned_depth": (cleaned_depth/depth_scale).astype(np.uint16),
+            # "denoise_invalid_mask": invalid_mask.astype(np.uint8)*255,
+        }
+        save_data(args, data, frame_idx)
+
+    cleaned_depth = cleaned_depth / depth_scale
+
+    return cleaned_depth, invalid_mask
+
+    # # Create a padded version of depth image to handle borders efficiently
+    # padded_depth = np.pad(depth_image_in_meters, pad_width=1, mode='edge')
+
+    # # Create a sliding window to extract neighbors
+    # neighbors = np.array([
+    #     padded_depth[i:i + 3, j:j + 3] for i in range(depth_image_in_meters.shape[0]) for j in range(depth_image_in_meters.shape[1])
+    # ])
+
+    # # Median of neighbors, ignoring NaN values
+    # median_neighbors = np.array([np.nanmedian(neighbors[i]) for i in range(len(neighbors))]).reshape(depth_image_in_meters.shape)
+
+    # # Apply the median of neighbors where noise is detected, ignoring invalid regions
+    # cleaned_depth[noise_mask & (invalid_mask == 0)] = median_neighbors[noise_mask & (invalid_mask == 0)]
+
+    # # Step 11: Convert cleaned depth back to the original scale (if needed)
+    # cleaned_depth_in_original_units = cleaned_depth / depth_scale
+
+    # return refined_noise_map, cleaned_depth_in_original_units
+
+
+
 def save_ply(rgb_image, depth_image, depth_scale, intrinsics, file_name, args=None, frame_idx=None):
     # Get the height and width of the image
     H, W, _ = rgb_image.shape
@@ -610,9 +723,9 @@ def save_ply(rgb_image, depth_image, depth_scale, intrinsics, file_name, args=No
     z = z[valid_mask]
     
     # Extract RGB values and filter based on valid depth mask
-    R = rgb_image[:, :, 0][valid_mask]  # Red channel
+    B = rgb_image[:, :, 0][valid_mask]  # Blue channel
     G = rgb_image[:, :, 1][valid_mask]  # Green channel
-    B = rgb_image[:, :, 2][valid_mask]  # Blue channel
+    R = rgb_image[:, :, 2][valid_mask]  # Red channel
     
     # Combine XYZ coordinates and RGB colors into a single array
     points = np.vstack([x, y, z, R, G, B]).T
