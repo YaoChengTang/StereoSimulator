@@ -10,6 +10,7 @@ from utils import image_process
 import os
 import numpy as np
 from fire import Fire
+from PIL import Image
 import csv
 DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 
@@ -30,41 +31,32 @@ def main(
     model = DepthAnythingV2(**model_configs[encoder])
     model.load_state_dict(torch.load(f'checkpoints/depth_anything_v2_{encoder}.pth', map_location='cpu'))
     model = model.to(DEVICE).eval()
-    folder = f'/data2/videos/youtube/video{idx}'
+    folder = f'/data2/Fooling3D/video_frame_sequence/video{idx}'
     video_list = os.listdir(folder)
     video_paths = [os.path.join(folder, i) for i in video_list]
-    csv_path = f'/data2/videos/meta_data/video{idx}.csv'
-    with open(csv_path, mode='r', newline='') as infile:
-        reader = csv.DictReader(infile)
-        fieldnames = reader.fieldnames
-        rows = list(reader)  # 读取所有行
-
+    # print(video_paths[93])
+    # print(video_paths[94])
+    # print(video_paths[95])
+    # exit(0)
+    video_paths = video_paths[95:]
     # 打开原文件并直接写回
-    infile.close()
-    for row in rows:
-        if row['depth'] == '0':  # depth 为 0 时进行处理
-            vpath = os.path.join(folder, row['video_name'])
-            try:
-                frame_list, frame_count = vf.parser_video(vpath, 2)
-            except:
-                print('CAN Not Open Video')
-                continue
-            cnt = 0
-            save_path = os.path.join(
-                f'/data2/videos/depth/depth{idx}', os.path.splitext(os.path.basename(vpath))[0]
-            )
-            os.makedirs(save_path, exist_ok=True)
-            print(save_path)
-            for frame in frame_list:
-                depth = model.infer_image(frame)
-                cv2.imwrite(os.path.join(save_path, f'{cnt}.png'), np.round(depth * 16).astype(np.uint16))
-                cnt += 1
-            row['depth'] = 1
-            with open(csv_path, mode='w', newline='') as file:
-                writer = csv.DictWriter(file, fieldnames=fieldnames)
-                writer.writeheader()  # 写入表头
-                writer.writerows(rows)  # 写入所有修改后的行
-            file.close()
+    for frame_folder in video_paths:
+        frame_names = [
+            p for p in os.listdir(frame_folder)
+            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", ".png"]
+        ]
+        frame_names.sort(key=lambda p: int(os.path.splitext(p.replace("frame_", ""))[0]))
+        frame_list = [np.array(Image.open(os.path.join(frame_folder, frame_name))) for frame_name in frame_names]
+        cnt = 0
+        save_path = os.path.join(
+            f'/data5/fooling-depth/depth/depth{idx}', os.path.basename(frame_folder)
+        )
+        os.makedirs(save_path, exist_ok=True)
+        print(save_path)
+        for frame in frame_list:
+            depth = model.infer_image(frame)
+            cv2.imwrite(os.path.join(save_path, f'frame_{cnt}.png'), np.round(depth * 16).astype(np.uint16))
+            cnt += 1
 
             
 if __name__ == "__main__":

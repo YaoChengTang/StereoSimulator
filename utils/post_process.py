@@ -130,32 +130,27 @@ def visualize_ransac(points, inliers, plane_params):
     # save Image
     plt.savefig('/data4/lzd/iccv25/vis/haha.png')
 
-def Process(videoName, frame_id):
+def Process(Z, source_image, mask_small = None, mask_large = None):
     """
     Process Mono Image, correct illusion region's depth and filter out noise.
 
     Pramas:
-        videoName (str): the name of process video。
-        frame_id (int): which frame you want to process。
+        mask_small(np.array): illusion mask
+        mask_large(np.array): support region
+        Z(np.array): depth image
+        source_image(np.array): source image, RGB image
 
     Out:
         processed image(np.array)
     """
-    mask_small_path = f"/data4/lzd/iccv25/vis/mask/{videoName}/{frame_id}.jpg"
-    mask_large_path = f"/data4/lzd/iccv25/vis/mask/{videoName}/{frame_id}_all.jpg"
-    depth_path = f"/data4/lzd/iccv25/vis/depth_anything/{videoName}/{frame_id}.png"
-    source_path = f"/data4/lzd/iccv25/vis/imgL/{videoName}/{frame_id}.png"
 
-
-    mask_small = load_image(mask_small_path)
-    mask_large = load_image(mask_large_path)
-    source_image = load_image(source_path)
-
-    mask_small = mask_small > 0
-    mask_large = mask_large > 0
-    Z = load_image(depth_path)
-    plt.imsave('/data4/lzd/iccv25/vis/test_post/1_o.png',Z, cmap='jet')
-    coords_2d = np.argwhere(mask_large & ~mask_small)
+    if mask_large is None:
+        mask_large = mask_small.copy()
+        coords_2d = np.argwhere(mask_small)
+    else:
+        mask_small = mask_small > 0
+        mask_large = mask_large > 0
+        coords_2d = np.argwhere(mask_large & ~mask_small)
     points_xyz = []
     for (i, j) in coords_2d:
         x_val = i
@@ -164,7 +159,7 @@ def Process(videoName, frame_id):
         points_xyz.append([x_val, y_val, z_val])
     points_xyz = np.array(points_xyz)  # (N, 3)
     # return mask_
-    plane_params, inliers = fit_plane_ransac(points_xyz, threshold=1, max_trials=1000)
+    plane_params, inliers = fit_plane_ransac(points_xyz, threshold=1, max_trials=200)
     a,b,c,d = plane_params
 
 
@@ -190,63 +185,42 @@ if __name__ == '__main__':
     mask_small = load_image(mask_small_path)
     mask_large = load_image(mask_large_path)
     source_image = load_image(source_path)
-    mask_small = mask_small > 0
-    mask_large = mask_large > 0
-    Z = load_image(depth_path)
-    plt.imsave('/data4/lzd/iccv25/vis/test_post/1_o.png',Z, cmap='jet')
-    coords_2d = np.argwhere(mask_large & ~mask_small)
-    points_xyz = []
-    for (i, j) in coords_2d:
-        x_val = i
-        y_val = j
-        z_val = Z[i, j]
-        points_xyz.append([x_val, y_val, z_val])
-    points_xyz = np.array(points_xyz)  # (N, 3)
-    # return mask_
-    plane_params, inliers = fit_plane_ransac(points_xyz, threshold=1, max_trials=1000)
-    a,b,c,d = plane_params
-    print("拟合的平面参数: ax + by + cz + d = 0")
-    print(f"a, b, c, d = {plane_params}")
-    print(f"内点数量: {np.sum(inliers)}")
-    cnt = 0
-    # rows, cols = np.where(mask_large & ~mask_small)
+    Z = Process(load_image(depth_path), source_image, mask_small, None)
+    cv2.imwrite('/data4/lzd/iccv25/vis/test_post/1_f_2.png', Z.astype(np.uint16))
+    # mask_small = mask_small > 0
+    # mask_large = mask_large > 0
+    # Z = load_image(depth_path)
+    # plt.imsave('/data4/lzd/iccv25/vis/test_post/1_o.png',Z, cmap='jet')
+    # coords_2d = np.argwhere(mask_large & ~mask_small)
+    # points_xyz = []
+    # for (i, j) in coords_2d:
+    #     x_val = i
+    #     y_val = j
+    #     z_val = Z[i, j]
+    #     points_xyz.append([x_val, y_val, z_val])
+    # points_xyz = np.array(points_xyz)  # (N, 3)
+    # # return mask_
+    # plane_params, inliers = fit_plane_ransac(points_xyz, threshold=1, max_trials=1000)
+    # a,b,c,d = plane_params
+    # print("拟合的平面参数: ax + by + cz + d = 0")
+    # print(f"a, b, c, d = {plane_params}")
+    # print(f"内点数量: {np.sum(inliers)}")
+    # cnt = 0
+    # rows, cols = np.where(mask_small)
     # for (i,j) in zip(rows, cols):
-    #     Z[i,j] -= (-d - (a * i + b * j)) / c
-    #     Z[i,j] = abs(Z[i,j])
-    #     if Z[i,j] < np.sqrt(a*a + b*b + 1):
-    #         cnt += 1
-    # print(cnt)
-    #     # print(Z[i,j])
-    # rows, cols = np.where(~(mask_large & ~mask_small))
-    # for (i,j) in zip(rows, cols):
-    #     Z[i,j] = 0
-
-    # bounds = [0, 10, 20, 30, 50, 80, 100]  # 分段边界
-    # norm = BoundaryNorm(bounds, ncolors=256)  # 定义边界归一化
-    # cmap = plt.get_cmap('jet')  # 使用 jet 颜色映射
-    # plt.imshow(Z, cmap=cmap, norm=norm)
-    # plt.axis('off')  # 去掉坐标轴
-    # plt.savefig('/data4/lzd/iccv25/vis/test_post/error_1000.png', bbox_inches='tight', pad_inches=0)
-    # plt.close()
-    # 保存图像
-    # exit(0)
-    # visualize_ransac(points_xyz, inliers, plane_params)
-
-    rows, cols = np.where(mask_small)
-    for (i,j) in zip(rows, cols):
-        Z[i,j] = (-d - (a * i + b * j)) / c
+    #     Z[i,j] = (-d - (a * i + b * j)) / c
 
 
 
-    Z = Z.astype(np.uint16)
-    # plt.imsave('/data4/lzd/iccv25/vis/test_post/1.png',Z, cmap='jet')
-    cv2.imwrite('/data4/lzd/iccv25/vis/test_post/1_.png', Z.astype(np.uint16))
-    # Load the source image and mask
-    radius = 8  # Window radius
-    eps = 1e-2  # Regularization parameter
-    filtered_image = guided_filter(Z, source_image, radius, eps)
-    Z[mask_large & ~mask_small] = filtered_image[mask_large & ~mask_small]
-    # plt.imsave('/data4/lzd/iccv25/vis/test_post/1_f.png',Z, cmap='jet')
-    cv2.imwrite('/data4/lzd/iccv25/vis/test_post/1_f_.png', Z.astype(np.uint16))
-    # img = Image.fromarray(filtered_image)
-    # img.save('/data4/lzd/iccv25/vis/test_post')
+    # Z = Z.astype(np.uint16)
+    # # plt.imsave('/data4/lzd/iccv25/vis/test_post/1.png',Z, cmap='jet')
+    # cv2.imwrite('/data4/lzd/iccv25/vis/test_post/1_.png', Z.astype(np.uint16))
+    # # Load the source image and mask
+    # radius = 8  # Window radius
+    # eps = 1e-2  # Regularization parameter
+    # filtered_image = guided_filter(Z, source_image, radius, eps)
+    # Z[mask_large & ~mask_small] = filtered_image[mask_large & ~mask_small]
+    # # plt.imsave('/data4/lzd/iccv25/vis/test_post/1_f.png',Z, cmap='jet')
+    # cv2.imwrite('/data4/lzd/iccv25/vis/test_post/1_f_.png', Z.astype(np.uint16))
+    # # img = Image.fromarray(filtered_image)
+    # # img.save('/data4/lzd/iccv25/vis/test_post')
