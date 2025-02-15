@@ -232,8 +232,8 @@ def update_meta_data(image_root, mask_root, depth_root, meta_root):
     video_name_list = df["frames_rel_dir"]
 
     cnt = 0
-    # data = {}
-    data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+    data = {}
+    # data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
     # for video_name in video_name_list:
     # for video_idx, video_name in enumerate(tqdm(video_name_list[400:1000], desc="Processing Videos", unit="video")):
     for video_idx, video_name in enumerate(tqdm(video_name_list, desc="Processing Videos", unit="video")):
@@ -300,7 +300,7 @@ def update_meta_data(image_root, mask_root, depth_root, meta_root):
                     area_type = info[3]
                     if obj_id not in mask_dict:
                         mask_dict[obj_id] = {}
-                    mask_dict[obj_id][area_type] = os.path.join(mask_root, video_name, mask_name)
+                    mask_dict[obj_id][area_type] = os.path.join(mask_root, video_name, frame_mask_name)
                 except Exception as err:
                     print(len(data.keys()))
                     raise Exception(err, frame_mask_name, info, video_name, frame_name, cnt)
@@ -309,10 +309,17 @@ def update_meta_data(image_root, mask_root, depth_root, meta_root):
             data[video_name][frame_name]["image"] = frame_path
             data[video_name][frame_name]["depth"] = depth_path
             data[video_name][frame_name]["mask"]  = mask_dict
+
+            # print(f"{frame_path}\r\n{depth_path}\r\n{frame_mask_name_list}")
+            # print(data)
+
+            # break
         
         # Check if the value is empty or None
         if not data[video_name]:
             del data[video_name]
+
+        # break
 
     # Save and update the meta data
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
