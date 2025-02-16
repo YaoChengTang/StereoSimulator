@@ -331,15 +331,22 @@ def update_meta_data(image_root, mask_root, depth_root, meta_root):
     print(cnt)
 
 def load_rgb_image(path):
+    if not os.path.exists(path):
+        return None
     return cv2.imread(path)
 
 def load_depth_image(path):
+    if not os.path.exists(path):
+        return None
     return cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
 def load_mask_image(path):
+    if not os.path.exists(path):
+        return None
     mask = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    mask[mask>=128] = 255
-    mask[mask<128] = 0
+    if mask is not None:
+        mask[mask>=128] = 255
+        mask[mask<128] = 0
     return mask
 
 def is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
@@ -791,75 +798,89 @@ import os
 import multiprocessing
 from tqdm import tqdm
 
-def process_frame(video_name, frame_name, frame_dict, mask_dict, area_types, depth_root):
+def process_frame(video_name, frame_name, frame_dict, area_types, depth_root):
     """
     Process a single frame.
     """
-    frame_path = frame_dict["image"]
-    depth_path = frame_dict["depth"]
+    try:
+        frame_path = frame_dict["image"]
+        depth_path = frame_dict["depth"]
+        mask_dict  = frame_dict["mask"]
+        
+        left_image = load_rgb_image(frame_path)
+        depth_image = load_depth_image(depth_path)
+
+        if left_image is None:
+            print(f"No RGB image: {frame_path}")
+            return
+        
+        if depth_image is None:
+            print(f"No depth image: {depth_path}")
+            return
+
+        mask_image_dict = {}
+        obj_id_list = list(mask_dict.keys())
+        for obj_id in obj_id_list:
+            ill_mask_path = mask_dict[obj_id].get(area_types[0])
+            sup_mask_path = mask_dict[obj_id].get(area_types[1])
+
+            # Skip this illusion mask if mask does not exist
+            if ill_mask_path is None or not os.path.exists(ill_mask_path):
+                continue
+
+            ill_mask = load_mask_image(ill_mask_path)
+            # Skip this illusion mask if too few positive values in the mask
+            if ill_mask is None or (ill_mask > 128).sum() < 100:
+                print(f"Too few positive values in the illusion mask: {ill_mask_path}")
+                continue
+
+            sup_mask = None
+            if sup_mask_path is not None and os.path.exists(sup_mask_path):
+                sup_mask = load_mask_image(sup_mask_path)
+            # The sup_mask is invalid if too few positive values in the mask
+            if sup_mask is not None and (sup_mask > 128).sum() < 100:
+                print(f"Too few positive values in the support mask: {sup_mask_path}")
+                sup_mask = None
+            # The sup_mask is unreliable when excessive overlap with the illusion region
+            if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
+                print(f"The sup_mask is unreliable: {sup_mask_path}")
+                sup_mask = None
+
+            mask_image_dict[obj_id] = {}
+            mask_image_dict[obj_id][area_types[0]] = ill_mask
+            mask_image_dict[obj_id][area_types[1]] = sup_mask
+
+        # Skip this frame if no valid illusion mask
+        if len(mask_image_dict.keys()) == 0:
+            return
+
+        # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
+        mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
+
+        # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
+        rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
+                            depth_root, depth_path,
+                            min_area=100, thickness=5, 
+                            dis_thold=0.01, ransac_n=3, n_itr=1000, 
+                            bound_size=7, radius=8, eps=0.01)
     
-    left_image = load_rgb_image(frame_path)
-    depth_image = load_depth_image(depth_path)
-
-    mask_image_dict = {}
-    obj_id_list = list(mask_dict.keys())
-    for obj_id in obj_id_list:
-        ill_mask_path = mask_dict[obj_id].get(area_types[0])
-        sup_mask_path = mask_dict[obj_id].get(area_types[1])
-
-        # Skip this illusion mask if mask does not exist
-        if ill_mask_path is not None and not os.path.exists(ill_mask_path):
-            continue
-
-        ill_mask = load_mask_image(ill_mask_path)
-        # Skip this illusion mask if too few positive values in the mask
-        if ill_mask is not None and (ill_mask > 128).sum() < 100:
-            print(f"Too few positive values in the illusion mask: {ill_mask_path}")
-            continue
-
-        sup_mask = None
-        if sup_mask_path is not None and os.path.exists(sup_mask_path):
-            sup_mask = load_mask_image(sup_mask_path)
-        # The sup_mask is invalid if too few positive values in the mask
-        if sup_mask is not None and (sup_mask > 128).sum() < 100:
-            print(f"Too few positive values in the support mask: {sup_mask_path}")
-            sup_mask = None
-        # The sup_mask is unreliable when excessive overlap with the illusion region
-        if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
-            print(f"The sup_mask is unreliable: {sup_mask_path}")
-            sup_mask = None
-
-        mask_image_dict[obj_id] = {}
-        mask_image_dict[obj_id][area_types[0]] = ill_mask
-        mask_image_dict[obj_id][area_types[1]] = sup_mask
-
-    # Skip this frame if no valid illusion mask
-    if len(mask_image_dict.keys()) == 0:
-        return
-
-    # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
-    mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
-
-    # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
-    rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
-                        depth_root, depth_path,
-                        min_area=100, thickness=5, 
-                        dis_thold=0.01, ransac_n=3, n_itr=1000, 
-                        bound_size=7, radius=8, eps=0.01)
+    except Exception as err:
+        raise Exception(err, f"\r\nvideo_name: {video_name}\r\nframe_name: {frame_name}\r\n" + \
+                             f"frame_dict: {frame_dict}\r\narea_types:{area_types}\r\ndepth_root: {depth_root}")
 
 def process_video(video_name, video_dict, area_types, depth_root):
     """
     Process all frames in a single video in parallel.
     """
     # Calculate the number of processes (CPU cores - 10)
-    num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
-    # num_processes = 1
+    # num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
+    num_processes = 20
 
     # Use multiprocessing to process frames concurrently
     with multiprocessing.Pool(processes=num_processes) as pool:
         # Prepare tasks as a list of arguments for process_frame
         tasks = [
-            (video_name, frame_name, frame_dict, frame_dict["mask"], area_types, depth_root)
+            (video_name, frame_name, frame_dict, area_types, depth_root)
             for frame_name, frame_dict in video_dict.items()
         ]
         # Process frames in parallel
@@ -873,13 +894,26 @@ if __name__ == '__main__':
     depth_root = "/data5/fooling-depth/depth"
     meta_root  = "/data2/Fooling3D/meta_data"
 
+    # update_meta_data(image_root, mask_root, depth_root, meta_root)
+
     # Load metadata
     area_types = ["illusion", "nonillusion"]
     data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
 
     # Process each video in parallel
+    # start_from_video_name = None
+    # start_from_video_name = "video0/the_cake_studio_shorts"
+    start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
+    started = False
     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
+        # Start from last failure video
+        if start_from_video_name is not None:
+            if video_name==start_from_video_name:
+                started = True
+            if not started:
+                continue
         process_video(video_name, video_dict, area_types, depth_root)
+        # break
 
 
 
@@ -892,10 +926,21 @@ if __name__ == '__main__':
 
 #     # update_meta_data(image_root, mask_root, depth_root, meta_root)
 
+#     # start_from_video_name = None
+#     start_from_video_name = "video0/the_cake_studio_shorts"
+#     started = False
+    
 #     area_types = ["illusion", "nonillusion"]
 #     data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
 #     # for video_name, video_dict in data.items():
 #     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
+#         # Start from last failure video
+#         if start_from_video_name is not None:
+#             if video_name==start_from_video_name:
+#                 started = True
+#             if not started:
+#                 continue
+
 #         for frame_name, frame_dict in video_dict.items():
 #             frame_path = frame_dict["image"]
 #             depth_path = frame_dict["depth"]
@@ -911,17 +956,17 @@ if __name__ == '__main__':
 #                 sup_mask_path = mask_dict[obj_id].get(area_types[1])
                 
 #                 # Skip this illusion mask if mask doe not exist
-#                 if ill_mask_path is not None and not os.path.exists(ill_mask_path):
+#                 if ill_mask_path is None or not os.path.exists(ill_mask_path):
 #                     continue
 
 #                 ill_mask = load_mask_image(ill_mask_path)
 #                 # Skip this illusion mask if too few postive values in the mask
-#                 if ill_mask is not None and (ill_mask>128).sum()<100:
+#                 if ill_mask is None or (ill_mask>128).sum()<100:
 #                     print(f"Too few postive values in the illusion mask: {ill_mask_path}")
 #                     continue
 
 #                 sup_mask = None
-#                 if sup_mask_path  is not None and os.path.exists(sup_mask_path):
+#                 if sup_mask_path is not None and os.path.exists(sup_mask_path):
 #                     sup_mask = load_mask_image(sup_mask_path)
 #                 # The sup_mask is invalid, if too few postive values in the mask
 #                 if sup_mask is not None and (sup_mask>128).sum()<100:
@@ -957,8 +1002,8 @@ if __name__ == '__main__':
 #             # print(f"ill_mask max: {ill_mask.max()}, min: {ill_mask.min()}")
 #             # print(f"mask: {obj_id_list}")
 
-#             # break
-#         # break
+#             break
+#         break
 
 
     # mask_small_path = "/data4/lzd/iccv25/vis/mask/Y2metaapp3D_Trick_Art_Hole_On_Line_Paper_Traffic_signs_No_horn_honking/326.jpg"
