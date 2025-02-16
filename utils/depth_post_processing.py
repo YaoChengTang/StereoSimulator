@@ -337,7 +337,10 @@ def load_depth_image(path):
     return cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
 def load_mask_image(path):
-    return cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    mask = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    mask[mask>=128] = 255
+    mask[mask<128] = 0
+    return mask
 
 def is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
     """
@@ -507,6 +510,9 @@ def correct_depth_with_plane(plane_model, depth_image, ill_mask, sup_mask):
     # Compute corrected depth values d' = - (a*u + b*v + d0) / c
     corrected_depth[v_coords, u_coords] = - (a * u_coords + b * v_coords + d_0) / c
 
+    # Limit the depth value into 0~1
+    corrected_depth = np.clip(corrected_depth, 0, 1)
+
     return corrected_depth
 
 
@@ -527,17 +533,59 @@ def get_mask_boundaries(mask, kernel_size=7):
 
     return boundary
 
-def selective_guided_filter(depth_image, left_image, ill_mask, sup_mask, bound_size=7, radius=8, eps=0.01):
+
+def detect_foreground_background_boundaries(left_image, ksize=7, threshold=None, dilation_iter=1):
     """
-    Apply guided filter only to the boundary regions of ill_mask and sup_mask.
+    Detect boundaries where foreground and background meet using edge detection.
+
+    Parameters:
+    left_image (np.ndarray): RGB image used for edge detection.
+    ksize (int): Sobel kernel size for edge detection.
+    threshold (int or None): Gradient magnitude threshold to define edges. If None, adaptive thresholding is used.
+    dilation_iter (int): Number of dilation iterations to enlarge the detected edges.
+
+    Returns:
+    np.ndarray: Binary mask where edges between foreground and background are detected.
+    """
+    # Convert to grayscale for edge detection
+    gray_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
+    
+    # Apply Sobel filter to detect edges
+    grad_x = cv2.Sobel(gray_image, cv2.CV_64F, 1, 0, ksize=ksize)
+    grad_y = cv2.Sobel(gray_image, cv2.CV_64F, 0, 1, ksize=ksize)
+    
+    # Compute the gradient magnitude
+    grad_mag = cv2.magnitude(grad_x, grad_y)
+    
+    # If no threshold is provided, use Otsu's thresholding to dynamically calculate the threshold
+    if threshold is None:
+        _, threshold = cv2.threshold(grad_mag.astype(np.uint8), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Create a binary mask based on the gradient magnitude and threshold
+    edge_mask = np.uint8(grad_mag > threshold)  # Detect strong edges
+    
+    # Enlarge the edge by dilation to capture the boundary areas more effectively
+    kernel = np.ones((2*ksize, 2*ksize), np.uint8)  # Square kernel for dilation
+    edge_mask = cv2.dilate(edge_mask, kernel, iterations=dilation_iter)
+    
+    return edge_mask
+
+def selective_guided_filter(depth_image, left_image, ill_mask, sup_mask, 
+                            bound_size=7, radius=8, eps=0.01, 
+                            edge_ksize=7, edge_threshold=100):
+    """
+    Apply guided filter only to the boundary regions of ill_mask and sup_mask, avoiding front-to-background crossings.
 
     Parameters:
     depth_image (np.ndarray): Depth map to be smoothed.
     left_image (np.ndarray): RGB guidance image.
     ill_mask (np.ndarray): Binary mask for illusion region (255=valid, 0=invalid).
     sup_mask (np.ndarray): Binary mask for support region (255=valid, 0=invalid).
-    radius (int): Filter window size.
+    bound_size (int): Filter window size.
+    radius (int): Filter radius.
     eps (float): Regularization term.
+    edge_ksize (int): Kernel size for detecting foreground-background boundaries.
+    edge_threshold (int): Threshold for detecting foreground-background boundaries.
 
     Returns:
     np.ndarray: Depth map with selective guided filtering applied.
@@ -547,25 +595,78 @@ def selective_guided_filter(depth_image, left_image, ill_mask, sup_mask, bound_s
     edge_mask = get_mask_boundaries(mask.astype(np.uint8), kernel_size=bound_size)
     edge_mask = (edge_mask > 0).astype(np.uint8)
 
+    # Detect foreground-background boundaries in the left image
+    fg_bg_edge_mask = detect_foreground_background_boundaries(left_image, ksize=edge_ksize, threshold=edge_threshold)
+    
+    # Combine edge masks: exclude foreground-background crossing regions from update
+    edge_mask = edge_mask & (fg_bg_edge_mask == 0)
+
     # Normalize depth map using image width
     scale = depth_image.max()
-    depth_normalized = depth_image.astype(np.float32) / scale
+    depth_normalized = depth_image / scale
 
     # Convert left_image to grayscale for guided filter
-    guide_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    guide_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY) / 255.0
 
     if depth_normalized is None or depth_normalized.size == 0:
         raise ValueError("Error: depth_normalized is empty or None. Check depth image processing.")
 
-
     # Apply guided filter to the entire depth map
-    smoothed_depth = cv2.ximgproc.guidedFilter(guide_image, depth_normalized, radius, eps)
+    smoothed_depth = cv2.ximgproc.guidedFilter(guide_image.astype(np.float32), depth_normalized.astype(np.float32), radius, eps)
+
+    # Limit the depth value into 0~1
+    smoothed_depth = np.clip(smoothed_depth, 0, 1)
 
     # Selectively update only the edge regions
     smooth_depth_image = depth_image.copy()
     smooth_depth_image[edge_mask == 1] = smoothed_depth[edge_mask == 1] * scale  # Restore original scale
 
     return smooth_depth_image
+    
+
+# def selective_guided_filter(depth_image, left_image, ill_mask, sup_mask, bound_size=7, radius=8, eps=0.01):
+#     """
+#     Apply guided filter only to the boundary regions of ill_mask and sup_mask.
+
+#     Parameters:
+#     depth_image (np.ndarray): Depth map to be smoothed.
+#     left_image (np.ndarray): RGB guidance image.
+#     ill_mask (np.ndarray): Binary mask for illusion region (255=valid, 0=invalid).
+#     sup_mask (np.ndarray): Binary mask for support region (255=valid, 0=invalid).
+#     radius (int): Filter window size.
+#     eps (float): Regularization term.
+
+#     Returns:
+#     np.ndarray: Depth map with selective guided filtering applied.
+#     """
+#     # Compute mask boundaries (only process edge pixels)
+#     mask = (ill_mask == 255) | (sup_mask == 255)
+#     edge_mask = get_mask_boundaries(mask.astype(np.uint8), kernel_size=bound_size)
+#     edge_mask = (edge_mask > 0).astype(np.uint8)
+
+#     # Normalize depth map using image width
+#     scale = depth_image.max()
+#     depth_normalized = depth_image / scale
+
+#     # Convert left_image to grayscale for guided filter
+#     guide_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY) / 255.0
+
+#     if depth_normalized is None or depth_normalized.size == 0:
+#         raise ValueError("Error: depth_normalized is empty or None. Check depth image processing.")
+
+#     # Apply guided filter to the entire depth map
+#     smoothed_depth = cv2.ximgproc.guidedFilter(guide_image.astype(np.float32), depth_normalized.astype(np.float32), radius, eps)
+
+#     # Limit the depth value into 0~1
+#     smoothed_depth = np.clip(smoothed_depth, 0, 1)
+
+#     # Selectively update only the edge regions
+#     smooth_depth_image = depth_image.copy()
+#     smooth_depth_image[edge_mask == 1] = smoothed_depth[edge_mask == 1] * scale  # Restore original scale
+
+#     # print("-"*10, depth_normalized.min(), depth_normalized.max(), depth_image.min(), depth_image.max(), smooth_depth_image.min(), smooth_depth_image.max())
+
+#     return smooth_depth_image
 
 
 def save_rectified_depth(depth_root, depth_path, depth_image, debug_info=""):
@@ -615,7 +716,8 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
                         depth_root, depth_path,
                         min_area=100, thickness=5, 
                         dis_thold=0.01, ransac_n=3, n_itr=1000, 
-                        bound_size=7, radius=8, eps=0.01):
+                        bound_size=7, radius=8, eps=0.01,
+                        edge_ksize=7, edge_threshold=100):
     """
     Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
 
@@ -634,10 +736,16 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
     - bound_size (int): Boundary size for selective smoothing.
     - radius (int): Filter window size for guided filtering.
     - eps (float): Regularization parameter for guided filtering.
+    - edge_ksize (int): Kernel size for detecting foreground-background boundaries.
+    - edge_threshold (int): Threshold for detecting foreground-background boundaries.
 
     Returns:
     - np.ndarray: Final smoothed depth map.
     """
+    # Normalization to avoid bad plane model due to too large depth value
+    rectified_depth_image = (depth_image - depth_image.min()) / (depth_image.max() - depth_image.min())
+    # rectified_depth_image = depth_image.copy()
+
     for obj_id, obj_masks_dict in mask_image_dict.items():
         ill_mask = obj_masks_dict.get(area_types[0], None)
         sup_mask = obj_masks_dict.get(area_types[1], None)
@@ -651,7 +759,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
             # save_rectified_depth(depth_root, depth_path, sup_mask, debug_info="maskFromIll")
 
         # Fit a plane (a*u + b*v + c*d + d0 = 0)
-        plane_model = fit_uvd_plane_open3d(sup_mask, depth_image, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
+        plane_model = fit_uvd_plane_open3d(sup_mask, rectified_depth_image, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
 
         # Ensure a valid plane model was found
         if plane_model is None:
@@ -659,88 +767,198 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
             continue
 
         # Correct depth values in ill_mask and sup_mask
-        corrected_depth_image = correct_depth_with_plane(plane_model, depth_image, ill_mask, sup_mask)
-        # save_rectified_depth(depth_root, depth_path, corrected_depth_image, debug_info="plane_fit")
+        corrected_depth_image = correct_depth_with_plane(plane_model, rectified_depth_image, ill_mask, sup_mask)
+        # save_rectified_depth(depth_root, depth_path, 
+        #                      corrected_depth_image * (depth_image.max() - depth_image.min()) + depth_image.min(), 
+        #                      debug_info="plane_fit")
 
         # Apply guided filtering only to boundary regions
-        smooth_depth_image = selective_guided_filter(corrected_depth_image, left_image, ill_mask, sup_mask, radius=radius, eps=eps)
+        smooth_depth_image = selective_guided_filter(corrected_depth_image, left_image, ill_mask, sup_mask, 
+                                                     bound_size=bound_size, radius=radius, eps=eps,
+                                                     edge_ksize=edge_ksize, edge_threshold=edge_threshold)
 
-        # Save the final depth map
-        save_rectified_depth(depth_root, depth_path, smooth_depth_image)
+        rectified_depth_image = smooth_depth_image
+
+    # Recover the scale of depth
+    rectified_depth_image = rectified_depth_image * (depth_image.max() - depth_image.min()) + depth_image.min()
+
+    # Save the final depth map
+    save_rectified_depth(depth_root, depth_path, rectified_depth_image)
 
 
-# Test
+
+import os
+import multiprocessing
+from tqdm import tqdm
+
+def process_frame(video_name, frame_name, frame_dict, mask_dict, area_types, depth_root):
+    """
+    Process a single frame.
+    """
+    frame_path = frame_dict["image"]
+    depth_path = frame_dict["depth"]
+    
+    left_image = load_rgb_image(frame_path)
+    depth_image = load_depth_image(depth_path)
+
+    mask_image_dict = {}
+    obj_id_list = list(mask_dict.keys())
+    for obj_id in obj_id_list:
+        ill_mask_path = mask_dict[obj_id].get(area_types[0])
+        sup_mask_path = mask_dict[obj_id].get(area_types[1])
+
+        # Skip this illusion mask if mask does not exist
+        if ill_mask_path is not None and not os.path.exists(ill_mask_path):
+            continue
+
+        ill_mask = load_mask_image(ill_mask_path)
+        # Skip this illusion mask if too few positive values in the mask
+        if ill_mask is not None and (ill_mask > 128).sum() < 100:
+            print(f"Too few positive values in the illusion mask: {ill_mask_path}")
+            continue
+
+        sup_mask = None
+        if sup_mask_path is not None and os.path.exists(sup_mask_path):
+            sup_mask = load_mask_image(sup_mask_path)
+        # The sup_mask is invalid if too few positive values in the mask
+        if sup_mask is not None and (sup_mask > 128).sum() < 100:
+            print(f"Too few positive values in the support mask: {sup_mask_path}")
+            sup_mask = None
+        # The sup_mask is unreliable when excessive overlap with the illusion region
+        if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
+            print(f"The sup_mask is unreliable: {sup_mask_path}")
+            sup_mask = None
+
+        mask_image_dict[obj_id] = {}
+        mask_image_dict[obj_id][area_types[0]] = ill_mask
+        mask_image_dict[obj_id][area_types[1]] = sup_mask
+
+    # Skip this frame if no valid illusion mask
+    if len(mask_image_dict.keys()) == 0:
+        return
+
+    # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
+    mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
+
+    # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
+    rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
+                        depth_root, depth_path,
+                        min_area=100, thickness=5, 
+                        dis_thold=0.01, ransac_n=3, n_itr=1000, 
+                        bound_size=7, radius=8, eps=0.01)
+
+def process_video(video_name, video_dict, area_types, depth_root):
+    """
+    Process all frames in a single video in parallel.
+    """
+    # Calculate the number of processes (CPU cores - 10)
+    num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
+    # num_processes = 1
+
+    # Use multiprocessing to process frames concurrently
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        # Prepare tasks as a list of arguments for process_frame
+        tasks = [
+            (video_name, frame_name, frame_dict, frame_dict["mask"], area_types, depth_root)
+            for frame_name, frame_dict in video_dict.items()
+        ]
+        # Process frames in parallel
+        pool.starmap(process_frame, tasks)
+
+
+
 if __name__ == '__main__':
     image_root = "/data2/Fooling3D/video_frame_sequence"
     mask_root  = "/data2/Fooling3D/sam_mask"
     depth_root = "/data5/fooling-depth/depth"
     meta_root  = "/data2/Fooling3D/meta_data"
 
-    # update_meta_data(image_root, mask_root, depth_root, meta_root)
-
+    # Load metadata
     area_types = ["illusion", "nonillusion"]
     data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
-    for video_name, video_dict in data.items():
-        for frame_name, frame_dict in video_dict.items():
-            frame_path = frame_dict["image"]
-            depth_path = frame_dict["depth"]
-            mask_dict  = frame_dict["mask"]
 
-            left_image = load_rgb_image(frame_path)
-            depth_image = load_depth_image(depth_path)
+    # Process each video in parallel
+    for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
+        process_video(video_name, video_dict, area_types, depth_root)
 
-            mask_image_dict = {}
-            obj_id_list = list(mask_dict.keys())
-            for obj_id in obj_id_list:
-                mask_image_dict[obj_id] = {}
+
+
+# # Test
+# if __name__ == '__main__':
+#     image_root = "/data2/Fooling3D/video_frame_sequence"
+#     mask_root  = "/data2/Fooling3D/sam_mask"
+#     depth_root = "/data5/fooling-depth/depth"
+#     meta_root  = "/data2/Fooling3D/meta_data"
+
+#     # update_meta_data(image_root, mask_root, depth_root, meta_root)
+
+#     area_types = ["illusion", "nonillusion"]
+#     data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+#     # for video_name, video_dict in data.items():
+#     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
+#         for frame_name, frame_dict in video_dict.items():
+#             frame_path = frame_dict["image"]
+#             depth_path = frame_dict["depth"]
+#             mask_dict  = frame_dict["mask"]
+
+#             left_image = load_rgb_image(frame_path)
+#             depth_image = load_depth_image(depth_path)
+
+#             mask_image_dict = {}
+#             obj_id_list = list(mask_dict.keys())
+#             for obj_id in obj_id_list:
+#                 ill_mask_path = mask_dict[obj_id].get(area_types[0])
+#                 sup_mask_path = mask_dict[obj_id].get(area_types[1])
                 
-                ill_mask_path = mask_dict[obj_id].get(area_types[0])
-                sup_mask_path = mask_dict[obj_id].get(area_types[1])
-                
-                # Skip this illusion mask if mask doe not exist
-                if ill_mask_path is not None and not os.path.exists(ill_mask_path):
-                    continue
+#                 # Skip this illusion mask if mask doe not exist
+#                 if ill_mask_path is not None and not os.path.exists(ill_mask_path):
+#                     continue
 
-                ill_mask = load_mask_image(ill_mask_path)
-                # Skip this illusion mask if too few postive values in the mask
-                if ill_mask is not None and (ill_mask>128).sum()<100:
-                    print(f"Too few postive values in the illusion mask: {sup_mask_path}")
-                    continue
+#                 ill_mask = load_mask_image(ill_mask_path)
+#                 # Skip this illusion mask if too few postive values in the mask
+#                 if ill_mask is not None and (ill_mask>128).sum()<100:
+#                     print(f"Too few postive values in the illusion mask: {ill_mask_path}")
+#                     continue
 
-                sup_mask = None
-                if sup_mask_path  is not None and os.path.exists(sup_mask_path):
-                    sup_mask = load_mask_image(sup_mask_path)
-                # The sup_mask is invalid, if too few postive values in the mask
-                if sup_mask is not None and (sup_mask>128).sum()<100:
-                    print(f"Too few postive values in the support mask: {sup_mask_path}")
-                    sup_mask = None
-                # The sup_mask is unreliable when excessive overlap with the illusion region
-                if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
-                    print(f"The sup_mask is unreliable: {sup_mask_path}")
-                    sup_mask = None
+#                 sup_mask = None
+#                 if sup_mask_path  is not None and os.path.exists(sup_mask_path):
+#                     sup_mask = load_mask_image(sup_mask_path)
+#                 # The sup_mask is invalid, if too few postive values in the mask
+#                 if sup_mask is not None and (sup_mask>128).sum()<100:
+#                     print(f"Too few postive values in the support mask: {sup_mask_path}")
+#                     sup_mask = None
+#                 # The sup_mask is unreliable when excessive overlap with the illusion region
+#                 if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
+#                     print(f"The sup_mask is unreliable: {sup_mask_path}")
+#                     sup_mask = None
                 
-                mask_image_dict[obj_id][area_types[0]] = ill_mask
-                mask_image_dict[obj_id][area_types[1]] = sup_mask
+#                 mask_image_dict[obj_id] = {}
+#                 mask_image_dict[obj_id][area_types[0]] = ill_mask
+#                 mask_image_dict[obj_id][area_types[1]] = sup_mask
             
-            # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
-            mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
+#             # Skip this frame if no valid illusion mask
+#             if len(mask_image_dict.keys()) == 0:
+#                 continue
 
-            print(f"{frame_path}\r\n{depth_path}\r\n{mask_dict}\r\n\r\n")
+#             # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
+#             mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
 
-            # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
-            # And then save the rectified depth image
-            rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
-                                depth_root, depth_path,
-                                min_area=100, thickness=5, 
-                                dis_thold=0.01, ransac_n=3, n_itr=1000, 
-                                bound_size=7, radius=8, eps=0.01)
+#             # print(f"{frame_path}\r\n{depth_path}\r\n{mask_dict}\r\n\r\n")
+
+#             # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
+#             # And then save the rectified depth image
+#             rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
+#                                 depth_root, depth_path,
+#                                 min_area=100, thickness=5, 
+#                                 dis_thold=0.01, ransac_n=3, n_itr=1000, 
+#                                 bound_size=7, radius=8, eps=0.01)
             
-            print(f"depth_image max: {depth_image.max()}, min: {depth_image.min()}")
-            print(f"ill_mask max: {ill_mask.max()}, min: {ill_mask.min()}")
-            print(f"mask: {obj_id_list}")
+#             # print(f"depth_image max: {depth_image.max()}, min: {depth_image.min()}")
+#             # print(f"ill_mask max: {ill_mask.max()}, min: {ill_mask.min()}")
+#             # print(f"mask: {obj_id_list}")
 
-            break
-        break
+#             # break
+#         # break
 
 
     # mask_small_path = "/data4/lzd/iccv25/vis/mask/Y2metaapp3D_Trick_Art_Hole_On_Line_Paper_Traffic_signs_No_horn_honking/326.jpg"
