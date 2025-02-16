@@ -4,6 +4,7 @@ import cv2
 import glob
 import pickle
 import shutil
+import multiprocessing
 
 import torch
 import torch.nn.functional as F
@@ -19,6 +20,9 @@ from datetime import datetime
 from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import normalize
 from matplotlib.colors import BoundaryNorm
+
+from utils import check_paths, load_meta_data, write_meta_data
+from utils import load_rgb_image, load_depth_image, load_mask_image
 
 
 
@@ -189,43 +193,6 @@ def Process(Z, source_image, mask_small = None, mask_large = None):
     return Z
 
 
-def check_paths(path_list, video_idx=None):
-    succ = True
-    for path in path_list:
-        if not os.path.exists(path):
-            # print(f"No such path {video_idx}: {path}")
-            succ = False
-    return succ
-
-
-def load_meta_data(path):
-    if not os.path.exists(path):
-        return {}
-
-    prefix, suffix = os.path.splitext(os.path.basename(path))
-    if suffix==".csv":
-        data =  pd.read_csv(path)
-
-    elif suffix==".pkl":
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
-
-    return data
-
-def write_meta_data(data, path):
-    prefix, suffix = os.path.splitext(os.path.basename(path))
-    if suffix==".csv":
-        if isinstance(data, pd.DataFrame):
-            data.to_csv(path, index=False)
-        else:
-            data = pd.DataFrame(data)
-            data.to_csv(path, index=False)
-
-    elif suffix==".pkl":
-        with open(path, 'wb') as f:
-            pickle.dump(data, f)
-
-
 def update_meta_data(image_root, mask_root, depth_root, meta_root):
     meta_path  = os.path.join(meta_root, "frames_metadata.csv")
     df = load_meta_data(meta_path)
@@ -330,24 +297,6 @@ def update_meta_data(image_root, mask_root, depth_root, meta_root):
     print(f"saving videos: {len(data.keys())}")
     print(cnt)
 
-def load_rgb_image(path):
-    if not os.path.exists(path):
-        return None
-    return cv2.imread(path)
-
-def load_depth_image(path):
-    if not os.path.exists(path):
-        return None
-    return cv2.imread(path, cv2.IMREAD_UNCHANGED)
-
-def load_mask_image(path):
-    if not os.path.exists(path):
-        return None
-    mask = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    if mask is not None:
-        mask[mask>=128] = 255
-        mask[mask<128] = 0
-    return mask
 
 def is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
     """
@@ -794,10 +743,6 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
 
 
 
-import os
-import multiprocessing
-from tqdm import tqdm
-
 def process_frame(video_name, frame_name, frame_dict, area_types, depth_root):
     """
     Process a single frame.
@@ -865,8 +810,8 @@ def process_frame(video_name, frame_name, frame_dict, area_types, depth_root):
                             bound_size=7, radius=8, eps=0.01)
     
     except Exception as err:
-        raise Exception(err, f"\r\nvideo_name: {video_name}\r\nframe_name: {frame_name}\r\n" + \
-                             f"frame_dict: {frame_dict}\r\narea_types:{area_types}\r\ndepth_root: {depth_root}")
+        raise Exception(err, f"video_name: {video_name}   frame_name: {frame_name}   " + \
+                             f"frame_dict: {frame_dict}   area_types:{area_types}   depth_root: {depth_root}")
 
 def process_video(video_name, video_dict, area_types, depth_root):
     """
@@ -903,7 +848,9 @@ if __name__ == '__main__':
     # Process each video in parallel
     # start_from_video_name = None
     # start_from_video_name = "video0/the_cake_studio_shorts"
-    start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
+    # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
+    # start_from_video_name = "video0/wall_painting_new_creative_design"
+    start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
     started = False
     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
         # Start from last failure video
