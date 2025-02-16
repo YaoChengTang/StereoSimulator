@@ -548,8 +548,8 @@ def selective_guided_filter(depth_image, left_image, ill_mask, sup_mask, bound_s
     edge_mask = (edge_mask > 0).astype(np.uint8)
 
     # Normalize depth map using image width
-    image_width = depth_image.shape[1]
-    depth_normalized = np.clip(depth_image, 0, image_width).astype(np.float32) / image_width
+    scale = depth_image.max()
+    depth_normalized = depth_image.astype(np.float32) / scale
 
     # Convert left_image to grayscale for guided filter
     guide_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
@@ -563,7 +563,7 @@ def selective_guided_filter(depth_image, left_image, ill_mask, sup_mask, bound_s
 
     # Selectively update only the edge regions
     smooth_depth_image = depth_image.copy()
-    smooth_depth_image[edge_mask == 1] = smoothed_depth[edge_mask == 1] * image_width  # Restore original scale
+    smooth_depth_image[edge_mask == 1] = smoothed_depth[edge_mask == 1] * scale  # Restore original scale
 
     return smooth_depth_image
 
@@ -648,7 +648,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
         # Generate sup_mask if missing or empty
         if sup_mask is None or sup_mask.size == 0:
             sup_mask = generate_sup_mask_from_ill(ill_mask, min_area=min_area, thickness=thickness)
-            save_rectified_depth(depth_root, depth_path, sup_mask, debug_info="maskFromIll")
+            # save_rectified_depth(depth_root, depth_path, sup_mask, debug_info="maskFromIll")
 
         # Fit a plane (a*u + b*v + c*d + d0 = 0)
         plane_model = fit_uvd_plane_open3d(sup_mask, depth_image, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
@@ -660,7 +660,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
 
         # Correct depth values in ill_mask and sup_mask
         corrected_depth_image = correct_depth_with_plane(plane_model, depth_image, ill_mask, sup_mask)
-        save_rectified_depth(depth_root, depth_path, corrected_depth_image, debug_info="plane_fit")
+        # save_rectified_depth(depth_root, depth_path, corrected_depth_image, debug_info="plane_fit")
 
         # Apply guided filtering only to boundary regions
         smooth_depth_image = selective_guided_filter(corrected_depth_image, left_image, ill_mask, sup_mask, radius=radius, eps=eps)
