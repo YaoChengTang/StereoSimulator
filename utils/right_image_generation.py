@@ -39,6 +39,7 @@ class ImageProcess():
     def sum_pooling(self, input_mask, kernel_size=3):
         summed_mask = F.avg_pool2d(input_mask.unsqueeze(0).unsqueeze(0).float(), kernel_size=kernel_size, stride=1, padding=kernel_size//2) * kernel_size * kernel_size
         return (summed_mask > (kernel_size * kernel_size // 2)).squeeze().int() 
+    
     def get_occlusion_mask(self, shifted):
 
         mask_up = shifted > 0
@@ -52,16 +53,103 @@ class ImageProcess():
             loc_up = np.ceil(loc)
             loc_down = np.floor(loc)
 
-            _mask_down = ((shifted_down[:, col + 2:] != loc_down) * (
-            (shifted_up[:, col + 2:] != loc_down))).min(-1)
-            _mask_up = ((shifted_down[:, col + 2:] != loc_up) * (
-            (shifted_up[:, col + 2:] != loc_up))).min(-1)
+            _mask_down = ((shifted_down[:, col + 2:] != loc_down) * 
+                          (shifted_up[:, col + 2:] != loc_down)).min(-1)
+            _mask_up   = ((shifted_down[:, col + 2:] != loc_up) * 
+                          (shifted_up[:, col + 2:] != loc_up)).min(-1)
 
-            mask_up[:, col] = mask_up[:, col] * _mask_up
+            mask_up[:, col]   = mask_up[:, col] * _mask_up
             mask_down[:, col] = mask_down[:, col] * _mask_down
 
         mask = mask_up + mask_down
         return mask
+
+    # def get_occlusion_mask(self, shifted):
+    #     H, W = shifted.shape
+
+    #     # Acquire valid shift
+    #     valid = shifted > 0
+
+    #     # Build valid position
+    #     shifted_up   = np.ceil(shifted).astype(np.int32)
+    #     shifted_down = np.floor(shifted).astype(np.int32)
+    #     print(f"shifted_up: {shifted_up.shape}, shifted_down: {shifted_down.shape}")
+
+    #     # Compute similarity for each position
+    #     shifted_up_extend   = shifted_up[..., np.newaxis]
+    #     shifted_down_extend = shifted_down[..., np.newaxis]
+    #     loc_up_extend       = shifted_up[:, np.newaxis, :]
+    #     loc_down_extend     = shifted_down[:, np.newaxis, :]
+
+    #     sim_down = np.all([np.equal(loc_down_extend, shifted_down_extend), 
+    #                        np.equal(loc_down_extend, shifted_up_extend)], 
+    #                       axis=0)  # (H, W, W)
+    #     sim_up = np.all([np.equal(loc_up_extend, shifted_down_extend), 
+    #                      np.equal(loc_up_extend, shifted_up_extend)], 
+    #                     axis=0)  # (H, W, W)
+    #     # sim_down = (loc_down_extend == shifted_down_extend) & (loc_down_extend == shifted_up_extend)  # (H,W,W)
+    #     # sim_up   = (loc_up_extend == shifted_down_extend) & (loc_up_extend == shifted_up_extend)  # (H,W,W)
+    #     print(f"sim_down: {sim_down.shape}, sim_up: {sim_up.shape}")
+
+    #     # Create a mask where mask[i, j] is True if and only if j >= i + 2
+    #     i_indices = np.arange(W)
+    #     j_indices = np.arange(W)
+    #     triangle_mask = j_indices >= (i_indices[:, None] + 2)  # (W,W)
+    #     # print(f"triangle_mask: {triangle_mask.shape}")
+
+    #     # Compute the occlusion mask
+    #     mask_down = (sim_down & triangle_mask[np.newaxis]).any(axis=2) * valid # (H,W)
+    #     mask_up   = (sim_up & triangle_mask[np.newaxis]).any(axis=2) * valid # (H,W)
+    #     # print(f"mask_down: {mask_down.shape}, mask_up: {mask_up.shape}")
+
+    #     # # Create the triangle mask (j >= i + 2)
+    #     # i_indices = np.arange(W)
+    #     # j_indices = np.arange(W)
+    #     # triangle_mask = j_indices >= (i_indices[:, None])
+
+    #     # # Compute the occlusion mask using broadcasting
+    #     # # Avoid creating full H x W x W array, instead directly perform pairwise comparisons
+    #     # mask_down = np.any(
+    #     #     (shifted_down[:, :, np.newaxis] == shifted_down[:, np.newaxis, :]) & 
+    #     #     (shifted_down[:, :, np.newaxis] == shifted_up[:, np.newaxis, :]) &
+    #     #     triangle_mask[np.newaxis], axis=2
+    #     # ) & valid
+
+    #     # mask_up = np.any(
+    #     #     (shifted_up[:, :, np.newaxis] == shifted_down[:, np.newaxis, :]) & 
+    #     #     (shifted_up[:, :, np.newaxis] == shifted_up[:, np.newaxis, :]) &
+    #     #     triangle_mask[np.newaxis], axis=2
+    #     # ) & valid
+
+    #     mask = mask_up + mask_down
+
+    #     return mask
+
+    # def get_occlusion_mask(self, warped_pos, disp):
+
+    #     mask_up = shifted > 0
+    #     mask_down = shifted > 0
+
+    #     shifted_up = np.ceil(shifted)
+    #     shifted_down = np.floor(shifted)
+
+    #     for col in range(shifted.shape[1] - 2):
+    #         loc = shifted[:, col:col + 1]  # keepdims
+    #         loc_up = np.ceil(loc)
+    #         loc_down = np.floor(loc)
+
+    #         _mask_down = ((shifted_down[:, col + 2:] != loc_down) * 
+    #                       (shifted_up[:, col + 2:] != loc_down)).min(-1)
+    #         _mask_up   = ((shifted_down[:, col + 2:] != loc_up) * 
+    #                       (shifted_up[:, col + 2:] != loc_up)).min(-1)
+
+    #         mask_up[:, col]   = mask_up[:, col] * _mask_up
+    #         mask_down[:, col] = mask_down[:, col] * _mask_down
+
+    #     mask = mask_up + mask_down
+    #     return mask
+
+    
     def warp(self, left_image, disparity_map):
         H, W, C = left_image.shape
         # print(left_image)
@@ -103,9 +191,10 @@ class ImageProcess():
         # find where occlusions are, and remove from disparity map
         start_time = time.time()
         mask = self.get_occlusion_mask(pix_locations)
+        occ_mask = mask.copy()
         masked_pix_locations = pix_locations * mask - process_width * (1 - mask)
         cost_time = time.time() - start_time
-        print("-"*10, f"get_occlusion_mask cost time: {cost_time:.3f}")
+        print("-"*10, f"get_occlusion_mask cost time: {cost_time:.3f}, mask: {mask.shape}, {mask.min()}, {mask.max()}")
 
         # do projection - linear interpolate up to 1 pixel away
         weights = np.ones((2, feed_height, process_width)) * 10000
@@ -140,6 +229,8 @@ class ImageProcess():
         cost_time = time.time() - start_time
         print("-"*10, f"linear interpolate cost time: {cost_time:.3f}")
 
+        # return warped_image, (occ_mask*255).astype(np.uint8)
+
         # # now fill occluded regions with random background
         # if not disable_background:
         #     warped_image[warped_image.max(-1) == 0] = background_image[warped_image.max(-1) == 0]
@@ -163,7 +254,7 @@ class ImageProcess():
         cost_time = time.time() - start_time
         print("-"*10, f"simple_lama cost time: {cost_time:.3f}", result.size)
         
-        return right_image, result, mask
+        return right_image, result, mask, (occ_mask*255).astype(np.uint8)
 
 
 def save_right_image(image_root, frame_path, right_image, debug_info=""):
@@ -205,7 +296,12 @@ def save_right_image(image_root, frame_path, right_image, debug_info=""):
         return
 
     # Save depth image as uint16 PNG
-    # cv2.imwrite(sv_path, right_image)
+    if isinstance(right_image, np.ndarray):
+        cv2.imwrite(sv_path, right_image)
+    elif isinstance(right_image, Image.Image):
+        right_image.save(sv_path)
+    else:
+        raise Exception(f"No support for type: {type(right_image)}")
     print(f"Saved generated right image: {sv_path}")
 
 
@@ -226,7 +322,8 @@ def determine_scaling_factor(disparity_map, image_width, threshold=0.9, epsilon=
         scaling_factor (float): The computed scaling factor for the disparity map.
     """
     # Initialize the search range for scaling factor
-    left, right = 0.0, 2.0  # You can adjust this range based on your expected scaling factor range
+    scaling_factor = image_width / disparity_map.max() / 4
+    left, right = scaling_factor/3, scaling_factor
     iteration = 0
     
     while right - left > epsilon and iteration < max_iterations:
@@ -262,28 +359,99 @@ def determine_scaling_factor(disparity_map, image_width, threshold=0.9, epsilon=
     return (left + right) / 2.0
 
 
+def project_image(left_image, disp_map):
+    H, W, C = left_image.shape
+    right_image = np.zeros((H,W,C))
+
+    # Compute the warped position
+    u, v = np.meshgrid(np.arange(W), np.arange(H))
+    u_projected = (u - disp_map).flatten()
+    v_projected = v.flatten()
+    u_choose    = u.flatten()
+
+    # Filter out points that project outside the image bounds (negative or too large values)
+    valid = u_projected >= 0
+    u_projected = u_projected[valid]
+    v_projected = v_projected[valid]
+    u_choose    = u_choose[valid]
+
+    # Compute the quantization position
+    u_projected_int = np.concatenate([np.ceil(u_projected).astype(int), np.floor(u_projected).astype(int)])
+    v_projected_int = np.concatenate([v_projected, v_projected])
+    u_choose_int    = np.concatenate([u_choose, u_choose])
+
+    # Filter out points that project outside the image bounds (negative or too large values)
+    valid = (u_projected_int >= 0) & (u_projected_int < W)
+    u_projected_int = u_projected_int[valid]
+    v_projected_int = v_projected_int[valid]
+    u_choose_int    = u_choose_int[valid]
+
+    # Assign value with the maximum disp/coordinate value for each pixel using NumPy operations (no loops)
+    # Create a temporary depth map with infinity (for minimum depth calculation)
+    tar = -100 * np.ones((H,W))
+    src = u_choose_int
+
+    print("*"*10, u_projected_int.max(), v_projected_int.max())
+
+    # Use np.maximum to apply the maximum disp/coordinate value for each pixel
+    np.maximum.at(tar, (v_projected_int, u_projected_int), src)
+
+    valid_mask = tar >= 0
+    rows, cols = np.where(valid_mask)
+    used_u = tar[(rows, cols)].astype(int)
+    right_image = np.zeros_like(left_image)
+    right_image[(rows, cols)] = left_image[(rows, used_u)]
+    occ_mask = np.zeros((H,W))
+    occ_mask[(rows, used_u)] = 1
+
+    return right_image, ~valid_mask, (occ_mask*255).astype(np.uint8)
+    
+
+def repair_image(right_image, invalid_mask, inpainter=None):
+    right_image = Image.fromarray(right_image)
+    invalid_mask = Image.fromarray(invalid_mask).convert('L')
+    right_image_repair = inpainter(right_image, invalid_mask)
+    return np.array(right_image_repair)
+
 # Define globally shared variables and initialization function
 def init_process():
     global img_processor
     img_processor = ImageProcess()
 
 
-def generate_right_image(left_image, disparity_map, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=100):
+def generate_right_image(left_image, disparity_map, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=-1):
     # Determine the appropriate scaling factor to ensure that at least a certain
     # percentage of points (default 90%) stay within the image width when warping.
     start_time = time.time()
     scale_factor = determine_scaling_factor(disparity_map, left_image.shape[1], 
                                             threshold=threshold, epsilon=epsilon, max_iterations=max_iterations)
+    print(f"scale_factor: {scale_factor}")
     cost_time = time.time() - start_time
     print("-"*10, f"determine_scaling_factor cost time: {cost_time:.3f}")
 
     # Generate the right image
     # img_processor = ImageProcess()
     global img_processor
-    right_image, right_image_fill, mask = img_processor.project_image(left_image, disparity_map * scale_factor)
+    right_image1, right_image_fill, mask, occ_mask1 = img_processor.project_image(left_image, disparity_map * scale_factor)
+    # right_image1, occ_mask1 = img_processor.project_image(left_image, disparity_map * scale_factor)
+
+    start_time = time.time()
+    right_image2, invalid_mask2, occ_mask2 = project_image(left_image, disparity_map * scale_factor)
+    cost_time = time.time() - start_time
+    print("-"*10, f"project_image cost time: {cost_time:.3f}")
+    
+    start_time = time.time()
+    right_image_repair = repair_image(right_image2, invalid_mask2, inpainter=img_processor.simple_lama)
+    cost_time = time.time() - start_time
+    print("-"*10, f"repair_image cost time: {cost_time:.3f}", right_image_repair.shape)
     
     # Save the gnerated right image
-    save_right_image(image_root, frame_path, right_image, debug_info="")
+    save_right_image(image_root, frame_path, right_image1, debug_info="raw_right")
+    save_right_image(image_root, frame_path, right_image_fill, debug_info="raw_fill")
+    save_right_image(image_root, frame_path, occ_mask1, debug_info="raw_occ")
+    save_right_image(image_root, frame_path, right_image2, debug_info="new_right")
+    save_right_image(image_root, frame_path, occ_mask2, debug_info="new_occ")
+    save_right_image(image_root, frame_path, right_image_repair, debug_info="new_fill")
 
 
 def process_frame(video_name, frame_name, frame_dict, area_types, image_root):
@@ -307,7 +475,7 @@ def process_frame(video_name, frame_name, frame_dict, area_types, image_root):
             print(f"No depth image: {depth_path}")
             return
         
-        generate_right_image(left_image, depth_image, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=100)
+        generate_right_image(left_image, depth_image, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=1)
 
     
     except Exception as err:
@@ -334,7 +502,7 @@ def process_video(video_name, video_dict, area_types, image_root):
         ]
         # Process frames in parallel
         # pool.starmap(process_frame, tasks)
-        pool.starmap(process_frame, tasks[:10])
+        pool.starmap(process_frame, tasks[:3])
 
 
 
