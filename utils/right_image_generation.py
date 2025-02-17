@@ -1,9 +1,27 @@
+import os
+import sys
+import cv2
+import glob
+import time
+import pickle
+import shutil
+import multiprocessing
+
 import torch
 import torch.nn.functional as F
-from PIL import Image
+
 import numpy as np
-import cv2
+import pandas as pd
+
+from PIL import Image
+from PIL import Image
+from tqdm import tqdm
+from datetime import datetime
 from simple_lama_inpainting import SimpleLama
+
+from utils import check_paths, load_meta_data, write_meta_data
+from utils import load_rgb_image, load_depth_image, load_mask_image
+
 
 class ImageProcess():
     def __init__(self):
@@ -83,12 +101,16 @@ class ImageProcess():
         pix_locations = xs - disp_map
 
         # find where occlusions are, and remove from disparity map
+        start_time = time.time()
         mask = self.get_occlusion_mask(pix_locations)
         masked_pix_locations = pix_locations * mask - process_width * (1 - mask)
+        cost_time = time.time() - start_time
+        print("-"*10, f"get_occlusion_mask cost time: {cost_time:.3f}")
 
         # do projection - linear interpolate up to 1 pixel away
         weights = np.ones((2, feed_height, process_width)) * 10000
 
+        start_time = time.time()
         for col in range(process_width - 1, -1, -1):
             loc = masked_pix_locations[:, col]
             loc_up = np.ceil(loc).astype(int)
@@ -115,6 +137,8 @@ class ImageProcess():
         weights = np.expand_dims(weights, -1)
         warped_image = warped_image[0] * weights[1] + warped_image[1] * weights[0]
         warped_image *= 255.
+        cost_time = time.time() - start_time
+        print("-"*10, f"linear interpolate cost time: {cost_time:.3f}")
 
         # # now fill occluded regions with random background
         # if not disable_background:
@@ -125,6 +149,7 @@ class ImageProcess():
         mask_[warped_image.max(-1) == 0] = 1
         mask_t = torch.from_numpy(mask_).squeeze()
         
+        start_time = time.time()
         mask_max = self.morphological_max(mask_t)
         mask_min = self.morphological_min(mask_max)
         mask_re = self.sum_pooling(mask_min)
@@ -135,9 +160,207 @@ class ImageProcess():
         right_image = Image.fromarray(right_image_np)
         mask = Image.fromarray(mask_re).convert('L')
         result = self.simple_lama(right_image, mask)
-            
+        cost_time = time.time() - start_time
+        print("-"*10, f"simple_lama cost time: {cost_time:.3f}", result.size)
+        
         return right_image, result, mask
 
 
+def save_right_image(image_root, frame_path, right_image, debug_info=""):
+    """
+    Save generated right image in a structured directory inside image_root.
+
+    Parameters:
+    image_root (str): The root directory containing depth files.
+    frame_path (str): The full path of the iamge file inside image_root.
+    right_image (np.ndarray): The generated right image to be saved.
+    """
+    # Ensure absolute paths
+    image_root = os.path.abspath(image_root)
+    frame_path = os.path.abspath(frame_path)
+
+    # Extract last folder name from image_root
+    last_folder = os.path.basename(image_root)
+    last_folder_parent = os.path.dirname(image_root)
+
+    # Define new root directory with "_rect" suffix
+    new_root = os.path.join(last_folder_parent, f"{last_folder}_right")
+
+    # Compute relative path inside image_root
+    relative_subpath = os.path.relpath(frame_path, image_root)
+
+    # Construct the final save path
+    sv_path = os.path.join(new_root, relative_subpath)
+    sv_dir = os.path.dirname(sv_path)
+    if debug_info is not None and len(debug_info)>0:
+        prefix, suffix = os.path.splitext(sv_path)
+        sv_path = f"{prefix}-{debug_info}{suffix}"
+
+    # Ensure the save directory exists
+    os.makedirs(sv_dir, exist_ok=True)
+
+    # Ensure right_image is valid before saving
+    if right_image is None or right_image.size == 0:
+        print(f"Error: right_image is empty. Skipping {sv_path}")
+        return
+
+    # Save depth image as uint16 PNG
+    # cv2.imwrite(sv_path, right_image)
+    print(f"Saved generated right image: {sv_path}")
 
 
+def determine_scaling_factor(disparity_map, image_width, threshold=0.9, epsilon=1e-6, max_iterations=100):
+    """
+    Determine the appropriate scaling factor to ensure that at least a certain
+    percentage of points (default 90%) stay within the image width when warping.
+    Uses binary search to efficiently find the scaling factor, with a limit on max iterations.
+    
+    Args:
+        disparity_map (numpy.ndarray): The input disparity map.
+        image_width (int): The width of the RGB image.
+        threshold (float): The desired percentage of valid points (0 to 1, default 0.9).
+        epsilon (float): The tolerance for binary search convergence.
+        max_iterations (int): The maximum number of iterations for the binary search.
+        
+    Returns:
+        scaling_factor (float): The computed scaling factor for the disparity map.
+    """
+    # Initialize the search range for scaling factor
+    left, right = 0.0, 2.0  # You can adjust this range based on your expected scaling factor range
+    iteration = 0
+    
+    while right - left > epsilon and iteration < max_iterations:
+        iteration += 1
+        
+        # Midpoint scaling factor
+        scaling_factor = (left + right) / 2.0
+        
+        # Scale disparity map
+        scaled_disparity_map = disparity_map * scaling_factor
+        
+        # Create a mesh grid of pixel indices for the left image
+        h, w = scaled_disparity_map.shape
+        x_left, y_left = np.meshgrid(np.arange(w), np.arange(h))
+        
+        # Calculate the warped coordinates in the right image
+        x_right = x_left - scaled_disparity_map
+        
+        # Count how many x_right coordinates are within valid image boundaries
+        valid_points = np.sum((x_right >= 0) & (x_right < image_width))
+        total_points = x_right.size
+        
+        # Check if the ratio of valid points meets the threshold
+        valid_ratio = valid_points / total_points
+        
+        # Binary search decision: adjust search range based on the validity
+        if valid_ratio >= threshold:
+            left = scaling_factor  # Move towards the higher scaling factor
+        else:
+            right = scaling_factor  # Move towards the lower scaling factor
+
+    # Return the midpoint as the optimal scaling factor
+    return (left + right) / 2.0
+
+
+# Define globally shared variables and initialization function
+def init_process():
+    global img_processor
+    img_processor = ImageProcess()
+
+
+def generate_right_image(left_image, disparity_map, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=100):
+    # Determine the appropriate scaling factor to ensure that at least a certain
+    # percentage of points (default 90%) stay within the image width when warping.
+    start_time = time.time()
+    scale_factor = determine_scaling_factor(disparity_map, left_image.shape[1], 
+                                            threshold=threshold, epsilon=epsilon, max_iterations=max_iterations)
+    cost_time = time.time() - start_time
+    print("-"*10, f"determine_scaling_factor cost time: {cost_time:.3f}")
+
+    # Generate the right image
+    # img_processor = ImageProcess()
+    global img_processor
+    right_image, right_image_fill, mask = img_processor.project_image(left_image, disparity_map * scale_factor)
+    
+    # Save the gnerated right image
+    save_right_image(image_root, frame_path, right_image, debug_info="")
+
+
+def process_frame(video_name, frame_name, frame_dict, area_types, image_root):
+    """
+    Process a single frame.
+    """
+    print(f"Process ID: {os.getpid()}")
+    try:
+        frame_path = frame_dict["image"]
+        depth_path = frame_dict["depth"]
+        depth_path = depth_path.replace("/depth/", "/depth_rect/")
+
+        left_image = load_rgb_image(frame_path)
+        depth_image = load_depth_image(depth_path)
+
+        if left_image is None:
+            print(f"No RGB image: {frame_path}")
+            return
+        
+        if depth_image is None:
+            print(f"No depth image: {depth_path}")
+            return
+        
+        generate_right_image(left_image, depth_image, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=100)
+
+    
+    except Exception as err:
+        raise Exception(err, f"video_name: {video_name}   frame_name: {frame_name}   " + \
+                             f"frame_dict: {frame_dict}   area_types:{area_types}   image_root: {image_root}")
+
+
+def process_video(video_name, video_dict, area_types, image_root):
+    """
+    Process all frames in a single video in parallel.
+    """
+    # Calculate the number of processes (CPU cores - 10)
+    # num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
+    num_processes = 1
+
+    multiprocessing.set_start_method('spawn', force=True)
+
+    # Use multiprocessing to process frames concurrently
+    with multiprocessing.Pool(processes=num_processes, initializer=init_process) as pool:
+        # Prepare tasks as a list of arguments for process_frame
+        tasks = [
+            (video_name, frame_name, frame_dict, area_types, image_root)
+            for frame_name, frame_dict in video_dict.items()
+        ]
+        # Process frames in parallel
+        # pool.starmap(process_frame, tasks)
+        pool.starmap(process_frame, tasks[:10])
+
+
+
+if __name__ == '__main__':
+    image_root = "/data2/Fooling3D/video_frame_sequence"
+    mask_root  = "/data2/Fooling3D/sam_mask"
+    depth_root = "/data5/fooling-depth/depth"
+    meta_root  = "/data2/Fooling3D/meta_data"
+
+    # Load metadata
+    area_types = ["illusion", "nonillusion"]
+    data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+
+    # Process each video in parallel
+    start_from_video_name = None
+    # start_from_video_name = "video0/the_cake_studio_shorts"
+    # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
+    # start_from_video_name = "video0/wall_painting_new_creative_design"
+    # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
+    started = False
+    for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
+        # Start from last failure video
+        if start_from_video_name is not None:
+            if video_name==start_from_video_name:
+                started = True
+            if not started:
+                continue
+        process_video(video_name, video_dict, area_types, image_root)
+        break
