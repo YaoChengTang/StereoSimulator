@@ -851,6 +851,7 @@ if __name__ == '__main__':
     # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
     # start_from_video_name = "video0/wall_painting_new_creative_design"
     start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
+    # start_from_video_name = "video0/modern_wall_texture_designs_for_Interior_with_Wallputty"
     started = False
     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
         # Start from last failure video

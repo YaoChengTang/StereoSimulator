@@ -9,6 +9,10 @@ import multiprocessing
 
 import torch
 import torch.nn.functional as F
+import torchvision.utils as vutils
+from torchvision.io import read_image
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, Sampler
 
 import numpy as np
 import pandas as pd
@@ -17,8 +21,9 @@ from PIL import Image
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
-from simple_lama_inpainting import SimpleLama
+# from simple_lama_inpainting import SimpleLama
 
+from inpainting import SimpleLama, PrivateSimpleLama, pad_img_to_modulo
 from utils import check_paths, load_meta_data, write_meta_data
 from utils import load_rgb_image, load_depth_image, load_mask_image
 
@@ -263,7 +268,7 @@ def save_right_image(image_root, frame_path, right_image, debug_info=""):
 
     Parameters:
     image_root (str): The root directory containing depth files.
-    frame_path (str): The full path of the iamge file inside image_root.
+    frame_path (str): The full path of the image file inside image_root.
     right_image (np.ndarray): The generated right image to be saved.
     """
     # Ensure absolute paths
@@ -391,7 +396,7 @@ def project_image(left_image, disp_map):
     tar = -100 * np.ones((H,W))
     src = u_choose_int
 
-    print("*"*10, u_projected_int.max(), v_projected_int.max())
+    # print("*"*10, u_projected_int.max(), v_projected_int.max())
 
     # Use np.maximum to apply the maximum disp/coordinate value for each pixel
     np.maximum.at(tar, (v_projected_int, u_projected_int), src)
@@ -419,39 +424,45 @@ def init_process():
     img_processor = ImageProcess()
 
 
-def generate_right_image(left_image, disparity_map, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=-1):
+def generate_right_image(left_image, disparity_map, 
+                         image_root=None, frame_path=None, 
+                         threshold=0.9, epsilon=1e-6, max_iterations=-1,
+                         repair_func=None):
     # Determine the appropriate scaling factor to ensure that at least a certain
     # percentage of points (default 90%) stay within the image width when warping.
-    start_time = time.time()
+    # start_time = time.time()
     scale_factor = determine_scaling_factor(disparity_map, left_image.shape[1], 
                                             threshold=threshold, epsilon=epsilon, max_iterations=max_iterations)
-    print(f"scale_factor: {scale_factor}")
-    cost_time = time.time() - start_time
-    print("-"*10, f"determine_scaling_factor cost time: {cost_time:.3f}")
+    # print(f"scale_factor: {scale_factor}")
+    # cost_time = time.time() - start_time
+    # print("-"*10, f"determine_scaling_factor cost time: {cost_time:.3f}")
 
     # Generate the right image
     # img_processor = ImageProcess()
-    global img_processor
-    right_image1, right_image_fill, mask, occ_mask1 = img_processor.project_image(left_image, disparity_map * scale_factor)
+    # global img_processor
+    # right_image1, right_image_fill, mask, occ_mask1 = img_processor.project_image(left_image, disparity_map * scale_factor)
     # right_image1, occ_mask1 = img_processor.project_image(left_image, disparity_map * scale_factor)
 
-    start_time = time.time()
+    # start_time = time.time()
     right_image2, invalid_mask2, occ_mask2 = project_image(left_image, disparity_map * scale_factor)
-    cost_time = time.time() - start_time
-    print("-"*10, f"project_image cost time: {cost_time:.3f}")
+    # cost_time = time.time() - start_time
+    # print("-"*10, f"project_image cost time: {cost_time:.3f}")
     
-    start_time = time.time()
-    right_image_repair = repair_image(right_image2, invalid_mask2, inpainter=img_processor.simple_lama)
-    cost_time = time.time() - start_time
-    print("-"*10, f"repair_image cost time: {cost_time:.3f}", right_image_repair.shape)
+    if repair_func is not None:
+        # start_time = time.time()
+        right_image_repair = repair_image(right_image2, invalid_mask2, inpainter=repair_func)
+        # cost_time = time.time() - start_time
+        # print("-"*10, f"repair_image cost time: {cost_time:.3f}", right_image_repair.shape)
     
-    # Save the gnerated right image
-    save_right_image(image_root, frame_path, right_image1, debug_info="raw_right")
-    save_right_image(image_root, frame_path, right_image_fill, debug_info="raw_fill")
-    save_right_image(image_root, frame_path, occ_mask1, debug_info="raw_occ")
-    save_right_image(image_root, frame_path, right_image2, debug_info="new_right")
-    save_right_image(image_root, frame_path, occ_mask2, debug_info="new_occ")
-    save_right_image(image_root, frame_path, right_image_repair, debug_info="new_fill")
+    # # Save the gnerated right image
+    # save_right_image(image_root, frame_path, right_image1, debug_info="raw_right")
+    # save_right_image(image_root, frame_path, right_image_fill, debug_info="raw_fill")
+    # save_right_image(image_root, frame_path, occ_mask1, debug_info="raw_occ")
+    # save_right_image(image_root, frame_path, right_image2, debug_info="new_right")
+    # save_right_image(image_root, frame_path, occ_mask2, debug_info="new_occ")
+    # save_right_image(image_root, frame_path, right_image_repair, debug_info="new_fill")
+
+    return right_image2, invalid_mask2, occ_mask2
 
 
 def process_frame(video_name, frame_name, frame_dict, area_types, image_root):
@@ -475,7 +486,10 @@ def process_frame(video_name, frame_name, frame_dict, area_types, image_root):
             print(f"No depth image: {depth_path}")
             return
         
-        generate_right_image(left_image, depth_image, image_root, frame_path, threshold=0.9, epsilon=1e-6, max_iterations=1)
+        global img_processor
+        generate_right_image(left_image, depth_image, image_root, frame_path, 
+                             threshold=0.9, epsilon=1e-6, max_iterations=1,
+                             repair_func=img_processor.simple_lama)
 
     
     except Exception as err:
@@ -502,8 +516,287 @@ def process_video(video_name, video_dict, area_types, image_root):
         ]
         # Process frames in parallel
         # pool.starmap(process_frame, tasks)
-        pool.starmap(process_frame, tasks[:3])
+        pool.starmap(process_frame, tasks[:10])
 
+
+
+# if __name__ == '__main__':
+#     image_root = "/data2/Fooling3D/video_frame_sequence"
+#     mask_root  = "/data2/Fooling3D/sam_mask"
+#     depth_root = "/data5/fooling-depth/depth"
+#     meta_root  = "/data2/Fooling3D/meta_data"
+
+#     # Load metadata
+#     area_types = ["illusion", "nonillusion"]
+#     data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+
+#     # Process each video in parallel
+#     start_from_video_name = None
+#     # start_from_video_name = "video0/the_cake_studio_shorts"
+#     # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
+#     # start_from_video_name = "video0/wall_painting_new_creative_design"
+#     # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
+#     started = False
+#     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
+#         # Start from last failure video
+#         if start_from_video_name is not None:
+#             if video_name==start_from_video_name:
+#                 started = True
+#             if not started:
+#                 continue
+#         process_video(video_name, video_dict, area_types, image_root)
+#         break
+
+
+
+
+
+
+class VideoFolderDataset(Dataset):
+    def __init__(self, image_root, depth_root, mask_root, area_types, pad_out_to_modulo=8):
+        """
+        Args:
+            image_root (str): Root directory containing the video frames.
+            depth_root (str): Root directory containing the depth maps.
+            mask_root (str): Root directory containing the mask data.
+        """
+        self.image_root = image_root
+        self.depth_root = depth_root
+        self.mask_root  = mask_root
+        self.area_types = area_types
+
+        self.pad_out_to_modulo = pad_out_to_modulo
+        
+        self.data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+
+        # Prepare the video frames and metadata
+        self.video_frames_info = []
+
+        for video_name, video_dict in self.data.items():
+            # # For test
+            # if video_name!="video0/modern_wall_texture_designs_for_Interior_with_Wallputty":
+            #     continue
+
+            frames_info = []
+            for frame_name, frame_dict in video_dict.items():
+                frame_path = frame_dict["image"]
+                depth_path = frame_dict["depth"]
+                depth_path = depth_path.replace("/depth/", "/depth_rect/")
+
+                if not os.path.exists(frame_path) or not os.path.exists(depth_path):
+                    continue
+
+                info = {
+                    "video_name": video_name,
+                    "frame_name": frame_name,
+                }
+                frames_info.append(info)
+
+            self.video_frames_info.append(frames_info)
+
+    def __len__(self):
+        return sum([len(frames_info) for frames_info in self.video_frames_info])
+
+    def __getitem__(self, idx):
+        try:
+            # Determine the video and frame index from the global index `idx`
+            video_idx, frame_idx = idx
+            frame_info = self.video_frames_info[video_idx][frame_idx]
+        except Exception as err:
+            raise Exception(err, f"idx: {idx}")
+
+        # Construct the paths for the frame, depth, and mask
+        video_name = frame_info["video_name"]
+        frame_name = frame_info["frame_name"]
+        frame_path = self.data[video_name][frame_name]["image"]
+        depth_path = self.data[video_name][frame_name]["depth"].replace("/depth/", "/depth_rect/")
+        mask_path  = self.data[video_name][frame_name]["mask"]
+
+        # Load the images
+        left_image = load_rgb_image(frame_path)
+        depth_image = load_depth_image(depth_path)
+
+        right_image, invalid_mask, occ_mask = generate_right_image(left_image, depth_image, threshold=0.9, epsilon=1e-6, max_iterations=1)
+
+        right_image_trans  = self.augment(right_image, enable_norm=True)
+        invalid_mask_trans = self.augment(invalid_mask)
+
+        # Load the mask image (assuming it's a binary mask image)
+        # mask_image = read_image(mask_path)
+        
+        # # Apply transformations if provided
+        # if self.transform:
+        #     left_image = self.transform(left_image)
+        #     depth_image = self.transform(depth_image)
+        #     mask_image = self.transform(mask_image)
+        
+
+        return video_name, frame_name, left_image, depth_image, right_image, invalid_mask, occ_mask, right_image_trans, invalid_mask_trans
+
+    def augment(self, image, enable_norm=False):
+        if enable_norm:
+            image = image / 255
+
+        if image.ndim == 2:
+            image = image[..., np.newaxis]
+
+        aug_image = torch.from_numpy(image).permute(2, 0, 1).float()
+        aug_image = pad_img_to_modulo(aug_image, self.pad_out_to_modulo)
+
+        return aug_image
+
+
+
+class VideoFolderBatchSampler(Sampler):
+    def __init__(self, dataset, batch_size):
+        """
+        Args:
+            dataset (Dataset): The dataset to sample from.
+            batch_size (int): The size of each batch (how many frames from the same video).
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+
+    def __iter__(self):
+        """
+        This will return indices of frames in a single video folder, ensuring batch contains only frames from that video.
+        """
+        for video_idx in range(len(self.dataset.video_frames_info)):
+            frames_info = self.dataset.video_frames_info[video_idx]
+            num_frames = len(frames_info)
+            frame_idx_list = list(np.arange(num_frames))
+
+            # If frames count is not divisible by batch size, repeat the last frame
+            if num_frames % self.batch_size != 0:
+                num_repeat = self.batch_size - (num_frames % self.batch_size)
+                frame_idx_list += [frame_idx_list[-1]] * num_repeat  # Add last frame to fill up batch
+
+            # Yield frames in batches of batch_size
+            for i in range(0, len(frame_idx_list), self.batch_size):
+                batch_info = [(video_idx,frame_idx ) for frame_idx in frame_idx_list[i:i + self.batch_size]]
+                yield batch_info
+
+    def __len__(self):
+        """
+        The length of the sampler is the number of total batches in all videos.
+        """
+        total_batches = 0
+        for frames_info in self.dataset.video_frames_info:
+            total_batches += len(frames_info) // self.batch_size + (1 if len(frames_info) % self.batch_size != 0 else 0)
+        return total_batches
+
+
+from concurrent.futures import ThreadPoolExecutor
+def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, image_batch, 
+                            debug_info="", silence=False):
+    """
+    Save generated right image in a structured directory inside image_root.
+    Here, we suppose the images inside the batch come from the same video.
+
+    Parameters:
+    image_root (str): The root directory containing left image files.
+    video_name (str): The video name.
+    frame_name (str): The frame name.
+    image (torch.tensor): The generated right image to be saved.
+    """
+    # Define new root directory with "_rect" suffix
+    new_root = image_root + "_right"
+
+    # Construct the final save path
+    sv_dir  = os.path.join(new_root, video_name_batch[0])
+    os.makedirs(sv_dir, exist_ok=True)
+
+    # image_batch = image_batch.permute(0, 2, 3, 1)
+    # image_batch = torch.clamp(image_batch * 255, 0, 255)
+    # image_batch = image_batch.cpu().numpy().astype(np.uint8)
+
+    # for frame_name, image in zip(frame_name_batch, image_batch):
+    #     sv_name = frame_name
+    #     if debug_info is not None and len(debug_info)>0:
+    #         prefix, suffix = os.path.splitext(frame_name)
+    #         sv_name = f"{prefix}-{debug_info}{suffix}"
+    #     sv_path = os.path.join(sv_dir, sv_name)
+
+    #     cv2.imwrite(sv_path, image)
+
+    #     if not silence:
+    #         print(f"Saved generated right image: {sv_path}")
+    
+    # image_batch = torch.clamp(image_batch * 255, 0, 255)
+    # for frame_name, image in zip(frame_name_batch, image_batch):
+    #     sv_name = frame_name
+    #     if debug_info is not None and len(debug_info)>0:
+    #         prefix, suffix = os.path.splitext(frame_name)
+    #         sv_name = f"{prefix}-{debug_info}{suffix}"
+
+    #     sv_path = os.path.join(sv_dir, sv_name)
+    #     vutils.save_image([image], sv_path)
+
+    #     if not silence:
+    #         print(f"Saved generated right image: {sv_path}")
+
+    # image_batch = image_batch.permute(0, 2, 3, 1)
+    # image_batch = torch.clamp(image_batch * 255, 0, 255)
+    # image_batch = image_batch.cpu().numpy().astype(np.uint8)
+
+    # def save_image(i):
+    #     frame_name = frame_name_batch[i]
+    #     image = image_batch[i]
+
+    #     sv_name = frame_name
+    #     if debug_info is not None and len(debug_info)>0:
+    #         prefix, suffix = os.path.splitext(frame_name)
+    #         sv_name = f"{prefix}-{debug_info}{suffix}"
+    #     sv_path = os.path.join(sv_dir, sv_name)
+
+    #     cv2.imwrite(sv_path, image)
+    
+    # with ThreadPoolExecutor(max_workers=len(frame_name_batch)) as executor:
+    #     executor.map(save_image, range(len(frame_name_batch)))
+
+    image_batch = torch.clamp(image_batch, 0, 1)
+    def save_image(i):
+        frame_name = frame_name_batch[i]
+        image = image_batch[i:i+1]
+
+        sv_name = frame_name
+        if debug_info is not None and len(debug_info)>0:
+            prefix, suffix = os.path.splitext(frame_name)
+            sv_name = f"{prefix}-{debug_info}{suffix}"
+        sv_path = os.path.join(sv_dir, sv_name)
+
+        vutils.save_image(image, sv_path)
+
+    with ThreadPoolExecutor(max_workers=len(frame_name_batch)) as executor:
+        executor.map(save_image, range(len(frame_name_batch)))
+
+
+import logging
+class Logger:
+    def __init__(self, log_root, exp_name):
+        self.log_dir = os.path.join(log_root, exp_name)
+        os.makedirs(self.log_dir, exist_ok=True)
+        
+        self.log_path = os.path.join(self.log_dir, datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log')
+
+        self.logger = logging.getLogger('my_logger')
+        self.logger.setLevel(logging.INFO)
+
+        file_handler = logging.FileHandler(self.log_path)
+        file_handler.setLevel(logging.INFO)
+
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - idx: %(message)s')
+        file_handler.setFormatter(formatter)
+
+        self.logger.addHandler(file_handler)
+
+    def info(self, info):
+        self.logger.info(info)
+
+    def print_running_state(self, batch_idx, total_batch_num, msg, log_step=1):
+        if batch_idx%log_step == 0:
+            msg = f"{batch_idx}/{total_batch_num}:   {msg}"
+            self.info(msg)
 
 
 if __name__ == '__main__':
@@ -511,24 +804,57 @@ if __name__ == '__main__':
     mask_root  = "/data2/Fooling3D/sam_mask"
     depth_root = "/data5/fooling-depth/depth"
     meta_root  = "/data2/Fooling3D/meta_data"
+    log_root   = "/data5/yao/runs/log"
 
     # Load metadata
     area_types = ["illusion", "nonillusion"]
-    data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
 
-    # Process each video in parallel
-    start_from_video_name = None
-    # start_from_video_name = "video0/the_cake_studio_shorts"
-    # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
-    # start_from_video_name = "video0/wall_painting_new_creative_design"
-    # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
-    started = False
-    for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
-        # Start from last failure video
-        if start_from_video_name is not None:
-            if video_name==start_from_video_name:
-                started = True
-            if not started:
-                continue
-        process_video(video_name, video_dict, area_types, image_root)
-        break
+    batch_size  = 8
+    num_workers = batch_size*3
+    log_step = 50
+
+    # Initialize the dataset
+    dataset = VideoFolderDataset(image_root, depth_root, mask_root, area_types)
+
+    # Initialize VideoFolderBatchSampler
+    batch_sampler = VideoFolderBatchSampler(dataset, batch_size=batch_size)
+
+    # Initialize DataLoader
+    dataloader = DataLoader(dataset, batch_sampler=batch_sampler, num_workers=num_workers)
+    total_batch_num = len(dataloader)
+
+    inpainter = PrivateSimpleLama()
+    logger = Logger(log_root, "generate_right_image")
+
+    # start_time = time.time()
+    # for batch_idx, (video_name, frame_name, left_image, depth_image, right_image, invalid_mask, occ_mask) in enumerate(dataloader):
+    # for batch_idx, data in enumerate(tqdm(dataloader, desc="Processing batches")):
+    for batch_idx, data in enumerate(tqdm(dataloader, desc="Processing batches", 
+                                          bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} batches, {rate_fmt}")):
+        video_name, frame_name, \
+        left_image, depth_image, right_image, invalid_mask, occ_mask, \
+        right_image_trans, invalid_mask_trans = data
+        
+        msg = f"{video_name[0]} - {frame_name[0]}: left_image: {left_image.shape}, depth_image: {depth_image.shape}, " + \
+              f"right_image: {right_image.shape}, invalid_mask: {invalid_mask.shape}, occ_mask: {occ_mask.shape}, " + \
+              f"right_image_trans: {right_image_trans.shape}, invalid_mask_trans: {invalid_mask_trans.shape}"
+        logger.print_running_state(batch_idx, total_batch_num, msg, log_step)
+
+        try:
+            # right_image_repair = right_image_trans
+            right_image_trans = right_image_trans[:,[2,1,0],...]
+            right_image_repair = inpainter(right_image_trans.cuda(), invalid_mask_trans.cuda())
+            # print(f"right_image_repair: {right_image_repair.shape}")
+
+            # Save images
+            save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, silence=True)
+            # save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, debug_info="tensor")
+        except Exception as err:
+            raise Exception(err, f"{video_name}  {frame_name}")
+
+        # cost_time = time.time() - start_time
+        # print(f"cost_time: {cost_time}")
+        # start_time = time.time()
+
+        if batch_idx>10:
+            break
