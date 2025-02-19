@@ -360,8 +360,11 @@ def determine_scaling_factor(disparity_map, image_width, threshold=0.9, epsilon=
         else:
             right = scaling_factor  # Move towards the lower scaling factor
 
+    scale_factor = (left + right) / 2.0
+    scale_factor = round(scale_factor, 5)
+
     # Return the midpoint as the optimal scaling factor
-    return (left + right) / 2.0
+    return scale_factor
 
 
 def project_image(left_image, disp_map):
@@ -462,7 +465,7 @@ def generate_right_image(left_image, disparity_map,
     # save_right_image(image_root, frame_path, occ_mask2, debug_info="new_occ")
     # save_right_image(image_root, frame_path, right_image_repair, debug_info="new_fill")
 
-    return right_image2, invalid_mask2, occ_mask2
+    return right_image2, invalid_mask2, occ_mask2, scale_factor
 
 
 def process_frame(video_name, frame_name, frame_dict, area_types, image_root):
@@ -616,7 +619,7 @@ class VideoFolderDataset(Dataset):
         left_image = load_rgb_image(frame_path)
         depth_image = load_depth_image(depth_path)
 
-        right_image, invalid_mask, occ_mask = generate_right_image(left_image, depth_image, threshold=0.9, epsilon=1e-6, max_iterations=1)
+        right_image, invalid_mask, occ_mask, scale_factor = generate_right_image(left_image, depth_image, threshold=0.9, epsilon=1e-6, max_iterations=1)
 
         right_image_trans  = self.augment(right_image, enable_norm=True)
         invalid_mask_trans = self.augment(invalid_mask)
@@ -631,7 +634,7 @@ class VideoFolderDataset(Dataset):
         #     mask_image = self.transform(mask_image)
         
 
-        return video_name, frame_name, left_image, depth_image, right_image, invalid_mask, occ_mask, right_image_trans, invalid_mask_trans
+        return video_name, frame_name, left_image, depth_image, right_image, invalid_mask, occ_mask, scale_factor, right_image_trans, invalid_mask_trans
 
     def augment(self, image, enable_norm=False):
         if enable_norm:
@@ -688,6 +691,7 @@ class VideoFolderBatchSampler(Sampler):
 
 from concurrent.futures import ThreadPoolExecutor
 def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, image_batch, 
+                            meta_root, scale_factor_batch,
                             debug_info="", silence=False):
     """
     Save generated right image in a structured directory inside image_root.
@@ -695,9 +699,12 @@ def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, imag
 
     Parameters:
     image_root (str): The root directory containing left image files.
-    video_name (str): The video name.
-    frame_name (str): The frame name.
-    image (torch.tensor): The generated right image to be saved.
+    video_name_batch (str): The video name.
+    frame_name_batch (str): The frame name.
+    image_batch (torch.tensor): The generated right image to be saved.
+    scale_factor_batch (int): The scaling factor used for generating the right image.
+    debug_info (str): Additional information to append to the frame name.
+    silence (bool): Whether to print debug information.
     """
     # Define new root directory with "_rect" suffix
     new_root = image_root + "_right"
@@ -769,6 +776,16 @@ def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, imag
 
     with ThreadPoolExecutor(max_workers=len(frame_name_batch)) as executor:
         executor.map(save_image, range(len(frame_name_batch)))
+    
+    # Save the scale_factor_batch into a CSV file with corresponding left image path
+    scale_factor_file = os.path.join(meta_root, "scale_factors.csv")
+    os.makedirs(os.path.dirname(scale_factor_file), exist_ok=True)
+
+    # Open the file in append mode and write new scale factors
+    with open(scale_factor_file, 'a') as f:
+        for frame_name, scale_factor in zip(frame_name_batch, scale_factor_batch):
+            sv_path = os.path.join(sv_dir, frame_name)
+            f.write(f"{sv_path},{scale_factor.item()}\n")
 
 
 import logging
@@ -778,6 +795,7 @@ class Logger:
         os.makedirs(self.log_dir, exist_ok=True)
         
         self.log_path = os.path.join(self.log_dir, datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.log')
+        print(f"Log file: {self.log_path}")
 
         self.logger = logging.getLogger('my_logger')
         self.logger.setLevel(logging.INFO)
@@ -833,10 +851,10 @@ if __name__ == '__main__':
                                           bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} batches, {rate_fmt}")):
         video_name, frame_name, \
         left_image, depth_image, right_image, invalid_mask, occ_mask, \
-        right_image_trans, invalid_mask_trans = data
+        scale_factor, right_image_trans, invalid_mask_trans = data
         
         msg = f"{video_name[0]} - {frame_name[0]}: left_image: {left_image.shape}, depth_image: {depth_image.shape}, " + \
-              f"right_image: {right_image.shape}, invalid_mask: {invalid_mask.shape}, occ_mask: {occ_mask.shape}, " + \
+              f"right_image: {right_image.shape}, invalid_mask: {invalid_mask.shape}, occ_mask: {occ_mask.shape}, scale_factor: {scale_factor[0]}" + \
               f"right_image_trans: {right_image_trans.shape}, invalid_mask_trans: {invalid_mask_trans.shape}"
         logger.print_running_state(batch_idx, total_batch_num, msg, log_step)
 
@@ -847,7 +865,8 @@ if __name__ == '__main__':
             # print(f"right_image_repair: {right_image_repair.shape}")
 
             # Save images
-            save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, silence=True)
+            save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, 
+                                    meta_root=meta_root, scale_factor_batch=scale_factor, silence=True)
             # save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, debug_info="tensor")
         except Exception as err:
             raise Exception(err, f"{video_name}  {frame_name}")
