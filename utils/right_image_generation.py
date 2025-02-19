@@ -809,7 +809,7 @@ if __name__ == '__main__':
     # Load metadata
     area_types = ["illusion", "nonillusion"]
 
-    batch_size  = 8
+    batch_size  = 10
     num_workers = batch_size*3
     log_step = 50
 
@@ -856,5 +856,5 @@ if __name__ == '__main__':
         # print(f"cost_time: {cost_time}")
         # start_time = time.time()
 
-        if batch_idx>10:
-            break
+        # if batch_idx>20:
+        #     break
