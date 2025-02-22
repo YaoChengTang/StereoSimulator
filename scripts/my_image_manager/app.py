@@ -17,7 +17,7 @@ images_per_page = 100  # 每页显示的图片数量
 current_image_index = 0  # 当前查看的图片索引
 
 
-@app.before_first_request
+@app.before_request
 def load_images():
     """
     在第一次请求前加载初始文件夹（如果设置）
@@ -52,7 +52,8 @@ def load_images_from_folder(folder_path):
         f for f in os.listdir(folder_path)
         if os.path.splitext(f)[1].lower() in valid_exts
     ]
-    images.sort(key=extract_int)  # 按整数部分排序
+    # images.sort(key=extract_int)  # 按整数部分排序
+    images.sort()
     print(f"[INFO] Loaded {len(images)} images from {folder_path}")
 
 
