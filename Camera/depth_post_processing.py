@@ -21,6 +21,7 @@ from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import normalize
 from matplotlib.colors import BoundaryNorm
 
+from plane_utils import fit_plane_ransac_cpu2gpu
 from utils import load_rgb_image, load_depth_image, load_mask_image
 from calibration import ZedCalibration, L515Calibration, WarpCalibration
 
@@ -163,17 +164,24 @@ def fit_uvd_plane_open3d(sup_mask, depth_image, dis_thold=0.01, ransac_n=3, n_it
     return tuple(plane_model)  # (a, b, c, d0)
 
 
-def fit_xyd_plane_open3d(sup_mask, depth_image, calib_info, dis_thold=0.01, ransac_n=3, n_itr=1000):
+def fit_xyd_plane(sup_mask, depth_image, calib_info, device=0, dis_thold=0.01, ransac_n=3, n_itr=1000, batch=1000):
     """
     Fit a plane equation (a*u + b*v + c*d + d0 = 0) using Open3D's RANSAC plane segmentation.
 
     Parameters:
     sup_mask (np.ndarray): Binary mask where 255 indicates valid points.
     depth_image (np.ndarray): Depth map with corresponding depth values.
+    calib_info (L515Calibration, ZedCalibration): Camera calibration information.
+    device (int): GPU device ID for RANSAC plane fitting.
+    dis_thold (float): Distance threshold for plane fitting.
+    ransac_n (int): Number of points used per RANSAC iteration.
+    n_itr (int): Maximum number of RANSAC iterations. It becomes n_itr//batch in GPU mode.
+    batch (int): Number of points considered in parallel during each batched RANSAC iteration.
 
     Returns:
     tuple: (a, b, c, d0) plane coefficients
     """
+    # Get camera intrinsic matrix 
     K = calib_info.get_raw_intrinsic_matrix()
 
     # Get valid (u, v) coordinates from support mask
@@ -197,14 +205,24 @@ def fit_xyd_plane_open3d(sup_mask, depth_image, calib_info, dis_thold=0.01, rans
     Z = depth_flat
 
     # Build (x, y, z) data
-    points = np.column_stack((u_coords, v_coords, d_coords))
+    points = np.column_stack((X, Y, Z))
 
-    # Build Open3D point cloud
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
+    if device>=0:
+        # print(f"resolution:{depth_image.shape}, points: {points.shape}")
+        # print("-"*30)
+        batch = 1000
+        plane_model, inliers = fit_plane_ransac_cpu2gpu(points, device=device, inlierthresh=dis_thold, 
+                                                        batch=batch, numbatchiter=n_itr//batch, verbose=False)
+        # print("-"*10, plane_model.shape, inliers.shape)
+    else:
+        # Build Open3D point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        # print(f"resolution:{depth_image.shape}, points: {points.shape}")
 
-    # Fit a plane via RANSAC
-    plane_model, inliers = pcd.segment_plane(distance_threshold=dis_thold, ransac_n=ransac_n, num_iterations=n_itr)
+        # Fit a plane via RANSAC
+        plane_model, inliers = pcd.segment_plane(distance_threshold=dis_thold, ransac_n=ransac_n, num_iterations=n_itr)
+        # print("-"*10, inliers.shape)
 
     return tuple(plane_model)  # (a, b, c, d0)
 
@@ -242,6 +260,64 @@ def correct_depth_with_plane(plane_model, depth_image, ill_mask, sup_mask):
 
     # Limit the depth value into 0~1
     corrected_depth = np.clip(corrected_depth, 0, 1)
+
+    return corrected_depth
+
+
+def correct_depth_with_plane_xyd(plane_model, depth_image, calib_info, mask, 
+                                 dis_thold=0.01, eps=np.finfo(float).eps):
+    """
+    Correct depth values in ill_mask from points in sup_mask using the fitted plane equation.
+
+    Parameters:
+    plane_model (tuple): (a, b, c, d) plane coefficients.
+    depth_image (np.ndarray): Original depth map.
+    mask (np.ndarray): Binary mask for the region (1 = valid).
+    dis_thold (float): Distance threshold for plane fitting.
+    eps (float): Small value to avoid division by zero.
+
+    Returns:
+    np.ndarray: Corrected depth map.
+    """
+    # Get camera intrinsic matrix 
+    K = calib_info.get_raw_intrinsic_matrix()
+
+    # Unpack plane coefficients
+    a, b, c, d_0 = plane_model
+
+    # Create a copy of the depth image to store corrected values
+    corrected_depth = depth_image.copy()
+    max_depth = depth_image.max()
+
+    # Get valid (u, v) coordinates from both masks
+    v_coords, u_coords = np.nonzero(mask)
+    d_coords = depth_image[v_coords, u_coords]
+
+    # Flatten the pixel coordinates
+    x_flat = u_coords.flatten()
+    y_flat = v_coords.flatten()
+    depth_flat = d_coords.flatten()
+
+    # Project Depth Points to 3D
+    # Convert pixel coordinates to normalized camera coordinates (in L515 camera frame)
+    fx = K[0, 0]
+    fy = K[1, 1]
+    cx = K[0, 2]
+    cy = K[1, 2]
+    
+    X = (x_flat - cx) * depth_flat / fx
+    Y = (y_flat - cy) * depth_flat / fy
+    Z = depth_flat
+
+    # Compute the depth of point on the plane, which is the intersection of the plane and the line from camera center
+    Z_new = -Z * d_0 / (a*X + b*Y + c*Z + eps)
+    # Update the depth value if the diference between original depth and new depth is larger than the threshold
+    Z_update = np.where(np.abs(Z-Z_new) < dis_thold, Z, Z_new)
+
+    # Update the depth value
+    corrected_depth[v_coords, u_coords] = Z_update
+    # Avoid invalid depth values
+    corrected_depth[corrected_depth > max_depth] = 0
 
     return corrected_depth
 
@@ -399,7 +475,7 @@ def save_rectified_depth(depth_root, depth_path, depth_image, debug_info=""):
 
 def rectify_depth_image(left_image, depth_image, mask_image_dict, calib_info,
                         area_types, depth_root, depth_path,
-                        min_area=100, thickness=5, 
+                        device=0, min_area=100, thickness=5, 
                         dis_thold=0.01, ransac_n=3, n_itr=1000, 
                         bound_size=7, radius=8, eps=0.01,
                         edge_ksize=7, edge_threshold=100):
@@ -414,6 +490,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, calib_info,
     - area_types (list): List containing two keys ['illusion', 'support'] to extract masks.
     - depth_root (str): Root directory for depth images.
     - depth_path (str): Full path to the original depth image.
+    - device (int): GPU device ID for RANSAC plane fitting.
     - min_area (int): Minimum area threshold for connected components in ill_mask.
     - thickness (int): Thickness of boundaries for sup_mask generation.
     - dis_thold (float): Distance threshold for RANSAC plane fitting.
@@ -429,7 +506,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, calib_info,
     - np.ndarray: Final smoothed depth map.
     """
     # Normalization to avoid bad plane model due to too large depth value
-    rectified_depth_image = rectified_depth_image * calib_info.get_depth_scale()
+    rectified_depth_image = depth_image * calib_info.get_depth_scale()
     # rectified_depth_image = (depth_image - depth_image.min()) / (depth_image.max() - depth_image.min())
     # rectified_depth_image = depth_image.copy()
 
@@ -445,10 +522,15 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, calib_info,
             # sup_mask = generate_sup_mask_from_ill(ill_mask, min_area=min_area, thickness=thickness)
             sup_mask = ill_mask.copy()
             # save_rectified_depth(depth_root, depth_path, sup_mask, debug_info="maskFromIll")
+        
+        # print(f"Processing {depth_image.shape} obj_id {obj_id} in {depth_path} with " + \
+        #       f"{(ill_mask>128).sum() / ill_mask.size * 100:.3f}% in ill_mask " + \
+        #       f"{(sup_mask>128).sum() / ill_mask.size * 100:.3f}% in sup_mask")
 
         # Fit a plane (a*u + b*v + c*d + d0 = 0)
         # plane_model = fit_uvd_plane_open3d(sup_mask, rectified_depth_image, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
-        plane_model = fit_xyd_plane_open3d(sup_mask, rectified_depth_image, calib_info, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
+        plane_model = fit_xyd_plane(sup_mask, rectified_depth_image, calib_info, 
+                                    device=device, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
 
         # Ensure a valid plane model was found
         if plane_model is None:
@@ -456,7 +538,9 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, calib_info,
             continue
 
         # Correct depth values in ill_mask and sup_mask
-        corrected_depth_image = correct_depth_with_plane(plane_model, rectified_depth_image, ill_mask, sup_mask)
+        # corrected_depth_image = correct_depth_with_plane(plane_model, rectified_depth_image, ill_mask, sup_mask)
+        corrected_depth_image = correct_depth_with_plane_xyd(plane_model, rectified_depth_image, calib_info, ill_mask, 
+                                                             dis_thold=dis_thold)
         # save_rectified_depth(depth_root, depth_path, 
         #                      corrected_depth_image * (depth_image.max() - depth_image.min()) + depth_image.min(), 
         #                      debug_info="plane_fit")
@@ -478,7 +562,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, calib_info,
 
 
 
-def process_frame(video_name, frame_name, frame_dict, calib_dict, area_types, depth_root):
+def process_frame(video_name, frame_name, frame_dict, calib_dict, area_types, depth_root, device):
     """
     Process a single frame.
     """
@@ -527,10 +611,10 @@ def process_frame(video_name, frame_name, frame_dict, calib_dict, area_types, de
             if sup_mask is not None and (sup_mask > 128).sum() < 100:
                 print(f"Too few positive values in the support mask: {sup_mask_path}")
                 sup_mask = None
-            # The sup_mask is unreliable when excessive overlap with the illusion region
-            if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
-                print(f"The sup_mask is unreliable: {sup_mask_path}")
-                sup_mask = None
+            # # The sup_mask is unreliable when excessive overlap with the illusion region
+            # if sup_mask is not None and is_support_unreliable(ill_mask, sup_mask, threshold=0.5):
+            #     print(f"The sup_mask is unreliable: {sup_mask_path}")
+            #     sup_mask = None
             # Set invalid pixels in the support mask to 0
             if sup_mask is not None:
                 sup_mask[~valid] = 0
@@ -543,14 +627,14 @@ def process_frame(video_name, frame_name, frame_dict, calib_dict, area_types, de
         if len(mask_image_dict.keys()) == 0:
             return
 
-        # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
-        mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
+        # # Removes obj_id whose illusion region is largely overlapped with other obj_id's illusion regions.
+        # mask_image_dict = clean_dirty_obj_ids(mask_image_dict, area_types, overlap_threshold=0.5)
 
         # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
         rectify_depth_image(left_image, depth_image, mask_image_dict, l515_calib, 
                             area_types, depth_root, depth_path,
-                            min_area=100, thickness=5, 
-                            dis_thold=0.01, ransac_n=3, n_itr=1000, 
+                            device=device, min_area=100, thickness=5, 
+                            dis_thold=0.01, ransac_n=3, n_itr=10000, 
                             bound_size=7, radius=8, eps=0.01)
     
     except Exception as err:
@@ -563,23 +647,36 @@ def process_video(video_name, video_dict, calib_dict, area_types, depth_root):
     """
     # Calculate the number of processes (CPU cores - 10)
     # num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
-    num_processes = 20
+    num_processes = 3
+
+    # Get the number of available GPUs
+    num_gpus = torch.cuda.device_count()
+    if num_gpus>0:
+        print(f"Using {num_gpus} GPUs for RANSAC plane fitting.")
+    else:
+        print("Using CPU for RANSAC plane fitting.")
 
     # Use multiprocessing to process frames concurrently
+    multiprocessing.set_start_method('spawn', force=True)
     with multiprocessing.Pool(processes=num_processes) as pool:
         # Prepare tasks as a list of arguments for process_frame
         tasks = [
-            (video_name, frame_name, frame_dict, calib_dict, area_types, depth_root)
-            for frame_name, frame_dict in video_dict.items()
+            (video_name, frame_name, frame_dict, calib_dict, area_types, depth_root, i%num_gpus if num_gpus>0 else -1)
+            for i, (frame_name, frame_dict) in enumerate(video_dict.items())
         ]
         # Process frames in parallel
         pool.starmap(process_frame, tasks)
+        # pool.starmap(process_frame, tasks[:1])
 
 
 def get_directories_with_image(root_dir):
     dirs_with_image = []
 
     for dirpath, dirnames, filenames in os.walk(root_dir):
+        # if dirpath.find("TransReflect")!=-1 or dirpath.find("StreetView")!=-1 or dirpath.find("Painting")!=-1:
+        #     continue
+        # if dirpath.find("PaperOnWall/Window4")==-1 and dirpath.find("TransReflect/Showcase3")==-1 and dirpath.find("Monitor/Cup2")==-1:
+        #     continue
         if dirpath.find("L515_color_image")!=-1 and any(file.lower().endswith(('.png', '.jpg', '.jpeg')) for file in filenames):
             dirs_with_image.append(dirpath)
 
@@ -591,7 +688,7 @@ def build_meta_data(video_dir_list, image_root, depth_root, mask_root):
         video_dict  = {}
 
         video_name  = os.path.relpath(video_dirpath, image_root)
-        object_path = os.path.basename(video_name)
+        object_path = os.path.dirname(video_name)
 
         for frame_file in os.listdir(video_dirpath):
             frame_id    = os.path.splitext(frame_file)[0]
@@ -600,9 +697,9 @@ def build_meta_data(video_dir_list, image_root, depth_root, mask_root):
             image_path = os.path.join(video_dirpath, frame_file)
             depth_path = os.path.join(depth_root, object_path, frame_id, "L515_depth_image.png")
             mask_dir  = os.path.dirname( image_path.replace("Dataset_new_structure", "SAM") )
-            print("-"*10, image_path, depth_path, mask_dir)
+            # print("-"*10, image_path, depth_path, mask_dir)
             mask_dict = {}
-            for mask_file in os.listdir(mask_dir):
+            for mask_file in glob.glob(os.path.join(mask_dir, f"{frame_id}*.jpg")):
                 _, obj_id, _, area_type = os.path.splitext(mask_file)[0].split("-")
                 if obj_id not in mask_dict:
                     mask_dict[obj_id] = {}
@@ -634,21 +731,26 @@ if __name__ == '__main__':
     area_types = ["illusion", "nonillusion"]
     
     video_dir_list = get_directories_with_image(image_root)
+    # video_dir_list = video_dir_list[:3]
     data = build_meta_data(video_dir_list, image_root, depth_root, mask_root)
-    print(data)
+    # import pprint
+    # pprint.pprint(data)
+    # for key, val in data.items():
+    #     print(key, end=": ")
+    #     pprint.pprint(val)
 
-    # # Process each video in parallel
-    # # start_from_video_name = None
+    # Process each video in parallel
+    start_from_video_name = None
     # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
-    # started = False
-    # for video_name, (video_dict, calib_dict) in tqdm(data.items(), desc="Processing videos"):
-    #     # Start from last failure video
-    #     if start_from_video_name is not None:
-    #         if video_name==start_from_video_name:
-    #             started = True
-    #         if not started:
-    #             continue
-    #     process_video(video_name, video_dict, calib_dict, area_types, depth_root)
-    #     # break
+    started = False
+    for video_name, (video_dict, calib_dict) in tqdm(data.items(), desc="Processing videos"):
+        # Start from last failure video
+        if start_from_video_name is not None:
+            if video_name==start_from_video_name:
+                started = True
+            if not started:
+                continue
+        process_video(video_name, video_dict, calib_dict, area_types, depth_root)
+        # break
 
 
