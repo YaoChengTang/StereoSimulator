@@ -164,7 +164,7 @@ def fit_uvd_plane_open3d(sup_mask, depth_image, dis_thold=0.01, ransac_n=3, n_it
     return tuple(plane_model)  # (a, b, c, d0)
 
 
-def fit_xyd_plane(sup_mask, depth_image, calib_info, device=0, dis_thold=0.01, ransac_n=3, n_itr=1000, batch=1000):
+def fit_xyd_plane(sup_mask, depth_image, calib_info, device=0, dis_thold=0.01, ransac_n=3, n_itr=1000, batch=100):
     """
     Fit a plane equation (a*u + b*v + c*d + d0 = 0) using Open3D's RANSAC plane segmentation.
 
@@ -634,13 +634,19 @@ def process_frame(video_name, frame_name, frame_dict, calib_dict, area_types, de
         rectify_depth_image(left_image, depth_image, mask_image_dict, l515_calib, 
                             area_types, depth_root, depth_path,
                             device=device, min_area=100, thickness=5, 
-                            dis_thold=0.01, ransac_n=3, n_itr=10000, 
+                            dis_thold=0.01, ransac_n=3, n_itr=1000, 
                             bound_size=7, radius=8, eps=0.01)
     
     except Exception as err:
         raise Exception(err, f"video_name: {video_name}   frame_name: {frame_name}   " + \
                              f"frame_dict: {frame_dict}   area_types:{area_types}   depth_root: {depth_root}")
 
+# Function to initialize each process with a specific GPU ID
+def init_process(gpu_id):
+    if gpu_id != -1:
+        torch.cuda.set_device(gpu_id)
+        print(f"Process {os.getpid()} is using GPU {gpu_id}")
+        
 def process_video(video_name, video_dict, calib_dict, area_types, depth_root):
     """
     Process all frames in a single video in parallel.
@@ -656,14 +662,23 @@ def process_video(video_name, video_dict, calib_dict, area_types, depth_root):
     else:
         print("Using CPU for RANSAC plane fitting.")
 
+    # Assign a fixed GPU ID to each process
+    gpu_ids = [i % num_gpus for i in range(num_processes)]
+
     # Use multiprocessing to process frames concurrently
     multiprocessing.set_start_method('spawn', force=True)
     with multiprocessing.Pool(processes=num_processes) as pool:
+    # with multiprocessing.Pool(processes=num_processes, initializer=init_process, initargs=(gpu_ids,)) as pool:
         # Prepare tasks as a list of arguments for process_frame
         tasks = [
             (video_name, frame_name, frame_dict, calib_dict, area_types, depth_root, i%num_gpus if num_gpus>0 else -1)
             for i, (frame_name, frame_dict) in enumerate(video_dict.items())
         ]
+
+        # Initialize processes with fixed GPU allocation
+        for gpu_id in gpu_ids:
+            pool.apply_async(init_process, args=(gpu_id,))  # Initialize the process on each GPU
+
         # Process frames in parallel
         pool.starmap(process_frame, tasks)
         # pool.starmap(process_frame, tasks[:1])
@@ -740,8 +755,10 @@ if __name__ == '__main__':
     #     pprint.pprint(val)
 
     # Process each video in parallel
-    start_from_video_name = None
-    # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
+    # start_from_video_name = None
+    # start_from_video_name = "Video/Downhill/L515_color_image"
+    # start_from_video_name = "Video/Objects/L515_color_image"
+    start_from_video_name = "Video/Driving1/L515_color_image"
     started = False
     for video_name, (video_dict, calib_dict) in tqdm(data.items(), desc="Processing videos"):
         # Start from last failure video

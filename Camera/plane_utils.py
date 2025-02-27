@@ -140,11 +140,11 @@ def fit_plane_ransac_cpu2gpu(points, device=0, inlierthresh=0.05, batch=1000, nu
     # Get the total number of GPUs available
     num_gpus = torch.cuda.device_count()
 
-    # Set the device to the GPU with the least memory usage
-    torch.cuda.set_device(device)
+    # # Set the device to the GPU with the least memory usage
+    # torch.cuda.set_device(device)
 
     # Move points to the selected GPU
-    points_t = torch.tensor(points).to(device)
+    points_t = torch.tensor(points).cuda()
     num_points = points_t.shape[0]
     # print(points.shape)
     # print(points_t.device)
