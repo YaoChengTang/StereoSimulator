@@ -313,6 +313,7 @@ def correct_depth_with_plane_xyd(plane_model, depth_image, calib_info, mask,
     Z_new = -Z * d_0 / (a*X + b*Y + c*Z + eps)
     # Update the depth value if the diference between original depth and new depth is larger than the threshold
     Z_update = np.where(np.abs(Z-Z_new) < dis_thold, Z, Z_new)
+    # Z_update = Z_new
 
     # Update the depth value
     corrected_depth[v_coords, u_coords] = Z_update
@@ -692,6 +693,8 @@ def get_directories_with_image(root_dir):
         #     continue
         # if dirpath.find("PaperOnWall/Window4")==-1 and dirpath.find("TransReflect/Showcase3")==-1 and dirpath.find("Monitor/Cup2")==-1:
         #     continue
+        # if dirpath.find("Video/Registration")==-1:
+        #     continue
         if dirpath.find("L515_color_image")!=-1 and any(file.lower().endswith(('.png', '.jpg', '.jpeg')) for file in filenames):
             dirs_with_image.append(dirpath)
 
@@ -755,10 +758,10 @@ if __name__ == '__main__':
     #     pprint.pprint(val)
 
     # Process each video in parallel
-    # start_from_video_name = None
+    start_from_video_name = None
     # start_from_video_name = "Video/Downhill/L515_color_image"
     # start_from_video_name = "Video/Objects/L515_color_image"
-    start_from_video_name = "Video/Driving1/L515_color_image"
+    # start_from_video_name = "Video/Driving1/L515_color_image"
     started = False
     for video_name, (video_dict, calib_dict) in tqdm(data.items(), desc="Processing videos"):
         # Start from last failure video
