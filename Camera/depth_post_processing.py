@@ -320,6 +320,11 @@ def correct_depth_with_plane_xyd(plane_model, depth_image, calib_info, mask,
     # Avoid invalid depth values
     corrected_depth[corrected_depth > max_depth] = 0
 
+    
+    # cv2.imwrite("./depth_image.png", cv2.applyColorMap(cv2.normalize((depth_image/0.00025).astype(np.uint16), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8), cv2.COLORMAP_JET))
+    # cv2.imwrite("./corrected_depth.png", cv2.applyColorMap(cv2.normalize((depth_image/0.00025).astype(np.uint16), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8), cv2.COLORMAP_JET))
+    # cv2.imwrite("./mask.png", ((mask>0)*255).astype(np.uint8))
+
     return corrected_depth
 
 
@@ -741,36 +746,66 @@ def build_meta_data(video_dir_list, image_root, depth_root, mask_root):
     return data
 
 
+# if __name__ == '__main__':
+#     image_root = "/data2/Fooling3D/real_data/Dataset_new_structure"
+#     mask_root  = "/data2/Fooling3D/real_data/SAM"
+#     depth_root = "/data2/Fooling3D/real_data/Dataset"
+
+#     area_types = ["illusion", "nonillusion"]
+    
+#     video_dir_list = get_directories_with_image(image_root)
+#     # video_dir_list = video_dir_list[:3]
+#     data = build_meta_data(video_dir_list, image_root, depth_root, mask_root)
+#     # import pprint
+#     # pprint.pprint(data)
+#     # for key, val in data.items():
+#     #     print(key, end=": ")
+#     #     pprint.pprint(val)
+
+#     # Process each video in parallel
+#     start_from_video_name = None
+#     # start_from_video_name = "Video/Downhill/L515_color_image"
+#     # start_from_video_name = "Video/Objects/L515_color_image"
+#     # start_from_video_name = "Video/Driving1/L515_color_image"
+#     started = False
+#     for video_name, (video_dict, calib_dict) in tqdm(data.items(), desc="Processing videos"):
+#         # Start from last failure video
+#         if start_from_video_name is not None:
+#             if video_name==start_from_video_name:
+#                 started = True
+#             if not started:
+#                 continue
+#         process_video(video_name, video_dict, calib_dict, area_types, depth_root)
+#         # break
+
+
+
+
+
 if __name__ == '__main__':
     image_root = "/data2/Fooling3D/real_data/Dataset_new_structure"
     mask_root  = "/data2/Fooling3D/real_data/SAM"
-    depth_root = "/data2/Fooling3D/real_data/Dataset"
+    depth_root = "/data2/Fooling3D/real_data/Dataset_rect"
 
-    area_types = ["illusion", "nonillusion"]
-    
-    video_dir_list = get_directories_with_image(image_root)
-    # video_dir_list = video_dir_list[:3]
-    data = build_meta_data(video_dir_list, image_root, depth_root, mask_root)
-    # import pprint
-    # pprint.pprint(data)
-    # for key, val in data.items():
-    #     print(key, end=": ")
-    #     pprint.pprint(val)
+    ref_depth_path = os.path.join(depth_root, "Video/Registration/0000/L515_depth_image.png")
+    ref_depth = load_depth_image(ref_depth_path)
 
-    # Process each video in parallel
-    start_from_video_name = None
-    # start_from_video_name = "Video/Downhill/L515_color_image"
-    # start_from_video_name = "Video/Objects/L515_color_image"
-    # start_from_video_name = "Video/Driving1/L515_color_image"
-    started = False
-    for video_name, (video_dict, calib_dict) in tqdm(data.items(), desc="Processing videos"):
-        # Start from last failure video
-        if start_from_video_name is not None:
-            if video_name==start_from_video_name:
-                started = True
-            if not started:
-                continue
-        process_video(video_name, video_dict, calib_dict, area_types, depth_root)
+    for tar_video in ["Cycling2", "Driving4", "Objects"]:
+        tar_video_dir = os.path.join(depth_root, f"Video/{tar_video}")
+        for tar_frame_id in os.listdir(tar_video_dir):
+            tar_frame_dir = os.path.join(tar_video_dir, tar_frame_id)
+            tar_depth_path = os.path.join(tar_frame_dir, "L515_depth_image.png")
+            
+            tar_depth = load_depth_image(tar_depth_path)
+
+            mask = load_mask_image(os.path.join(mask_root, f"Video/{tar_video}/L515_color_image/{tar_frame_id}-01-01-illusion.jpg"))
+            # print(os.path.join(mask_root, f"Video/{tar_video}/L515_depth_image/{tar_frame_id}-01-01-illusion.jpg"), type(mask))
+            mask = (mask>128) & (tar_depth>0)
+
+            tar_depth[mask] = ref_depth[mask]
+
+            cv2.imwrite(tar_depth_path, tar_depth.astype(np.uint16))
+            print(f"Saved rectified depth: {tar_depth_path}")
+            
+        #     break
         # break
-
-
