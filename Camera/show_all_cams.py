@@ -1,6 +1,7 @@
 import os
 import cv2
 import yaml
+import shutil
 import argparse
 import numpy as np
 import pyzed.sl as sl
@@ -325,6 +326,19 @@ def main(args):
                 elif key == ord('q'):  # Exit on pressing 'q'
                     print("Pressed 'q' key!")
                     break
+
+                elif key == ord('n'):  # Exit on pressing 'q'
+                    print("Pressed 'n' key!")
+                    print("Next video")
+                    scene_name = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    os.makedirs(os.path.join(args.root, scene_name), exist_ok=True)
+                    shutil.copy(os.path.join(args.root, args.scene_name, 'ZED_calib.yaml'), 
+                                os.path.join(args.root, scene_name, 'ZED_calib.yaml'))
+                    shutil.copy(os.path.join(args.root, args.scene_name, 'L515_calib.yaml'), 
+                                os.path.join(args.root, scene_name, 'L515_calib.yaml'))
+                    args.scene_name = scene_name
+                    idx = 0
+                    cnt = 0
 
                 elif key == 27:  # Exit on pressing 'ESC'
                     break
