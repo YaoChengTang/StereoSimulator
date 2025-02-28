@@ -3,8 +3,6 @@ import cv2
 import yaml
 import argparse
 import numpy as np
-import pyzed.sl as sl
-import pyrealsense2 as rs
 
 from PIL import Image
 from datetime import datetime
@@ -17,9 +15,12 @@ from calibration import ZedCalibration, L515Calibration, WarpCalibration
 
 def main(args):
     # Load calibration for both cameras (Realsense and ZED)
-    zed_calib = ZedCalibration(os.path.join(args.root, args.scene_name, "Zed_calib.yaml"))
+    zed_calib = ZedCalibration(os.path.join(args.root, args.scene_name, "ZED_calib.yaml"))
     l515_calib = L515Calibration(os.path.join(args.root, args.scene_name, "L515_calib.yaml"))
-    warp_calib = WarpCalibration(os.path.join(args.root, "calib", "L515_ZEDleft.yaml"))
+    if os.path.exists(os.path.join(args.root, "../../calib_file", "L515_ZEDleft.yaml")):
+        warp_calib = WarpCalibration(os.path.join(args.root, "../../calib_file", "L515_ZEDleft.yaml"))
+    else:
+        warp_calib = WarpCalibration(os.path.join(args.root, "../calib_file", "L515_ZEDleft.yaml"))
 
     K_L515 = l515_calib.get_raw_intrinsic_matrix()
     K_ZED = zed_calib.get_rectified_calib()['left']['intrinsic']
@@ -135,7 +136,7 @@ if __name__ == "__main__":
     parser.add_argument('--vis', action='store_true', help='Visualize intermediate results')
     args = parser.parse_args()
 
-    args.root = "./Dataset"
+    # args.root = "./Dataset"
     # args.scene_name = "demo-20250203_211254"
     # args.scene_name = "demo-20250205_001631"
     # args.scene_name = "20250224_191550"
