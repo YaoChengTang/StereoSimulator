@@ -768,7 +768,7 @@ def save_ply(rgb_image, depth_image, depth_scale, intrinsics, file_name, args=No
 
 
 
-    import os
+import os
 import sys
 import cv2
 import glob
@@ -836,3 +836,52 @@ def load_mask_image(path):
         mask[mask>=128] = 255
         mask[mask<128] = 0
     return mask
+
+def readPFM(file):
+    file = open(file, 'rb')
+
+    color = None
+    width = None
+    height = None
+    scale = None
+    endian = None
+
+    header = file.readline().rstrip()
+    if header == b'PF':
+        color = True
+    elif header == b'Pf':
+        color = False
+    else:
+        raise Exception('Not a PFM file.')
+
+    dim_match = re.match(rb'^(\d+)\s(\d+)\s$', file.readline())
+    if dim_match:
+        width, height = map(int, dim_match.groups())
+    else:
+        raise Exception('Malformed PFM header.')
+
+    scale = float(file.readline().rstrip())
+    if scale < 0: # little-endian
+        endian = '<'
+        scale = -scale
+    else:
+        endian = '>' # big-endian
+
+    data = np.fromfile(file, endian + 'f')
+    shape = (height, width, 3) if color else (height, width)
+
+    data = np.reshape(data, shape)
+    data = np.flipud(data)
+    return data
+
+def writePFM(file, array):
+    import os
+    assert type(file) is str and type(array) is np.ndarray and \
+           os.path.splitext(file)[1] == ".pfm"
+    with open(file, 'wb') as f:
+        H, W = array.shape
+        headers = ["Pf\n", f"{W} {H}\n", "-1\n"]
+        for header in headers:
+            f.write(str.encode(header))
+        array = np.flip(array, axis=0).astype(np.float32)
+        f.write(array.tobytes())

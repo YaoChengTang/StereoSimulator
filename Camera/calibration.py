@@ -154,6 +154,12 @@ class ZedCalibration:
     
     def get_rectified_calib(self):
         return self.rectified_calib
+    
+    def get_baseline(self):
+        return self.rectified_calib['T'][0] / 1000  # Convert from mm to meters
+    
+    def get_folcal_length(self):
+        return (self.rectified_calib['left']['fx'] + self.rectified_calib['left']['fy']) / 2
 
 
 
