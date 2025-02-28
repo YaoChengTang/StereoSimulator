@@ -78,8 +78,44 @@ def revert_dataset_structure(new_root_dir, original_root_dir):
                                     # Copy the file back to the original structure
                                     shutil.copy(file_path, original_file_path)
 
+def copy_sam2dataset(src_root, tar_root):
+    for scene in os.listdir(src_root):
+        src_scene_path = os.path.join(src_root, scene)
+        if not os.path.isdir(src_scene_path):
+            continue
+        
+        # Traverse through the objects in each scene
+        for obj in os.listdir(src_scene_path):
+            src_obj_path = os.path.join(src_scene_path, obj)
+            if not os.path.isdir(src_obj_path):
+                continue
+            
+            # Traverse through the L515 and ZED directories (L515_color_image and zed_left_color_image)
+            for camera in os.listdir(src_obj_path):
+                src_camera_path = os.path.join(src_obj_path, camera)
+                if not os.path.isdir(src_camera_path):
+                    continue
+                
+                # Traverse through the files in each category
+                for mask_file in os.listdir(src_camera_path):
+                    mask_name, suffix = os.splitext(mask_file)
+                    frame_id = mask_name.split('-')[0]
+
+                    # Create the target directory
+                    tar_mask_dir = os.path.join(tar_root, scene, obj, frame_id)
+                    tar_mask_name = mask_name.replace(frame_id, camera)
+                    tar_mask_path = os.path.join(tar_mask_dir, tar_mask_name)
+
+                    # Copy the file back to the original structure
+                    os.makedirs(tar_mask_dir, exist_ok=True)
+                    shutil.copy(os.path.join(src_camera_path, mask_file), tar_mask_path)
+
+
 # Example usage
-root_dir = '/data2/Fooling3D/real_data/Dataset'
-new_root_dir = '/data2/Fooling3D/real_data/Dataset_new_structure'
-convert_dataset_structure(root_dir, new_root_dir)
-# revert_dataset_structure(new_root_dir, root_dir)
+# root_dir = '/data2/Fooling3D/real_data/Dataset'
+# new_root_dir = '/data2/Fooling3D/real_data/Dataset_new_structure'
+# convert_dataset_structure(root_dir, new_root_dir)
+
+src_root = '/data2/Fooling3D/real_data/SAM'
+tar_root = '/data2/Fooling3D/real_data/sam_mask'
+copy_sam2dataset(src_root, tar_root)
