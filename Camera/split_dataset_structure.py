@@ -95,31 +95,31 @@ if __name__ == "__main__":
                 if mask is None:
                     continue
 
-                # Save the disparity image and mask image
-                tar_left_dir  = os.path.join(tar_root, "left", scene, obj)
+                # Save the disparity image and mask image with the same files structure of the training set
+                tar_left_dir  = os.path.join(tar_root, "left", f"{scene}_{obj}")
                 os.makedirs(tar_left_dir, exist_ok=True)
                 shutil.copy(src_left_path, os.path.join(tar_left_dir, f"frame_{frame_id}.png"))
 
-                tar_right_dir = os.path.join(tar_root, "right", scene, obj)
+                tar_right_dir = os.path.join(tar_root, "right", f"{scene}_{obj}")
                 os.makedirs(tar_right_dir, exist_ok=True)
                 shutil.copy(src_right_path, os.path.join(tar_right_dir, f"frame_{frame_id}.png"))
 
-                tar_disp_dir  = os.path.join(tar_root, "disp", scene, obj)
+                tar_disp_dir  = os.path.join(tar_root, "disp", f"{scene}_{obj}")
                 os.makedirs(tar_disp_dir, exist_ok=True)
                 writePFM(os.path.join(tar_disp_dir, f"frame_{frame_id}.pfm"), disp_image)
                 
-                tar_mask_dir  = os.path.join(tar_root, "mask", scene, obj)
+                tar_mask_dir  = os.path.join(tar_root, "mask", f"{scene}_{obj}")
                 os.makedirs(tar_mask_dir, exist_ok=True)
                 cv2.imwrite(os.path.join(tar_mask_dir, f"frame_{frame_id}.jpg"), mask.astype(np.uint8)*255)
 
                 data[(scene, obj, frame_id)] = {
-                    "left" : os.path.join("left", scene, obj, f"frame_{frame_id}.png"),
-                    "right": os.path.join("right", scene, obj, f"frame_{frame_id}.png"),
-                    "disp" : os.path.join("disp", scene, obj, f"frame_{frame_id}.pfm"),
-                    "mask" : os.path.join("mask", scene, obj, f"frame_{frame_id}.jpg"),
+                    "left" : os.path.join("left", f"{scene}_{obj}", f"frame_{frame_id}.png"),
+                    "right": os.path.join("right", f"{scene}_{obj}", f"frame_{frame_id}.png"),
+                    "disp" : os.path.join("disp", f"{scene}_{obj}", f"frame_{frame_id}.pfm"),
+                    "mask" : os.path.join("mask", f"{scene}_{obj}", f"frame_{frame_id}.jpg"),
                 }
 
                 cnt +=1
-            print(f"Saving to {os.path.join(tar_root, "xxx", scene, obj)} with {cnt} frames")
+            print(f"Saving to {os.path.join(tar_root, "xxx", f"{scene}_{obj}")} with {cnt} frames")
 
     write_meta_data(data, os.path.join(meta_root, "testing_enter.pkl"))
