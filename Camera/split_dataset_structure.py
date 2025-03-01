@@ -12,7 +12,7 @@ if __name__ == "__main__":
     otherdata_root = "/data2/Fooling3D/real_data/Dataset"
     sam_root = "/data2/Fooling3D/real_data/SAM"
     tar_root = "/data2/Fooling3D/real_data/testing"
-    meta_root = "/data2/Fooling3D/real_data/meta"
+    meta_root = "/data2/Fooling3D/meta_data"
 
     data = {}
     for scene in os.listdir(sam_root):
