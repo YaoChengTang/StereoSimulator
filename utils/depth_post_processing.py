@@ -21,6 +21,7 @@ from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import normalize
 from matplotlib.colors import BoundaryNorm
 
+from plane_utils import fit_plane_ransac_cpu2gpu
 from utils import check_paths, load_meta_data, write_meta_data
 from utils import load_rgb_image, load_depth_image, load_mask_image
 
@@ -193,14 +194,14 @@ def Process(Z, source_image, mask_small = None, mask_large = None):
     return Z
 
 
-def update_meta_data(image_root, mask_root, depth_root, meta_root):
+def update_meta_data(image_root, mask_root, depth_root, meta_root, file_name="data_dict"):
     meta_path  = os.path.join(meta_root, "frames_metadata.csv")
     df = load_meta_data(meta_path)
     video_name_list = df["frames_rel_dir"]
 
     cnt = 0
     data = {}
-    # data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+    # data = load_meta_data(os.path.join(meta_root, f"{file_name}.pkl"))
     # for video_name in video_name_list:
     # for video_idx, video_name in enumerate(tqdm(video_name_list[400:1000], desc="Processing Videos", unit="video")):
     for video_idx, video_name in enumerate(tqdm(video_name_list, desc="Processing Videos", unit="video")):
@@ -290,9 +291,9 @@ def update_meta_data(image_root, mask_root, depth_root, meta_root):
 
     # Save and update the meta data
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    write_meta_data(data, os.path.join(meta_root, f"data_dict_{timestamp}.pkl"))
-    shutil.copy(os.path.join(meta_root, f"data_dict_{timestamp}.pkl"), 
-                os.path.join(meta_root, f"data_dict.pkl"))
+    write_meta_data(data, os.path.join(meta_root, f"{file_name}_{timestamp}.pkl"))
+    shutil.copy(os.path.join(meta_root, f"{file_name}_{timestamp}.pkl"), 
+                os.path.join(meta_root, f"{file_name}.pkl"))
 
     print(f"saving videos: {len(data.keys())}")
     print(cnt)
@@ -408,7 +409,7 @@ def generate_sup_mask_from_ill(ill_mask, min_area=100, thickness=5):
     return sup_mask
 
 
-def fit_uvd_plane_open3d(sup_mask, depth_image, dis_thold=0.01, ransac_n=3, n_itr=1000):
+def fit_uvd_plane_open3d(sup_mask, depth_image, device=-1, dis_thold=0.01, ransac_n=3, n_itr=1000):
     """
     Fit a plane equation (a*u + b*v + c*d + d0 = 0) using Open3D's RANSAC plane segmentation.
 
@@ -425,12 +426,19 @@ def fit_uvd_plane_open3d(sup_mask, depth_image, dis_thold=0.01, ransac_n=3, n_it
     # Build (u, v, d) data
     points = np.column_stack((u_coords, v_coords, d_coords))
 
-    # Build Open3D point cloud
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
+    if device==-1:
+        # Build Open3D point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
 
-    # Fit a plane via RANSAC
-    plane_model, inliers = pcd.segment_plane(distance_threshold=dis_thold, ransac_n=ransac_n, num_iterations=n_itr)
+        # Fit a plane via RANSAC
+        plane_model, inliers = pcd.segment_plane(distance_threshold=dis_thold, ransac_n=ransac_n, num_iterations=n_itr)
+    else:
+        batch = 100
+        # print("before fit_plane_ransac_cpu2gpu")
+        plane_model, inliers = fit_plane_ransac_cpu2gpu(points, device=device, inlierthresh=dis_thold, 
+                                                        batch=batch, numbatchiter=n_itr//batch, verbose=False)
+        # print("after fit_plane_ransac_cpu2gpu")
 
     return tuple(plane_model)  # (a, b, c, d0)
 
@@ -669,7 +677,7 @@ def save_rectified_depth(depth_root, depth_path, depth_image, debug_info=""):
 
 
 def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
-                        depth_root, depth_path,
+                        device, depth_root, depth_path,
                         min_area=100, thickness=5, 
                         dis_thold=0.01, ransac_n=3, n_itr=1000, 
                         bound_size=7, radius=8, eps=0.01,
@@ -715,7 +723,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
             # save_rectified_depth(depth_root, depth_path, sup_mask, debug_info="maskFromIll")
 
         # Fit a plane (a*u + b*v + c*d + d0 = 0)
-        plane_model = fit_uvd_plane_open3d(sup_mask, rectified_depth_image, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
+        plane_model = fit_uvd_plane_open3d(sup_mask, rectified_depth_image, device=device, dis_thold=dis_thold, ransac_n=ransac_n, n_itr=n_itr)
 
         # Ensure a valid plane model was found
         if plane_model is None:
@@ -743,7 +751,7 @@ def rectify_depth_image(left_image, depth_image, mask_image_dict, area_types,
 
 
 
-def process_frame(video_name, frame_name, frame_dict, area_types, depth_root):
+def process_frame(video_name, frame_name, frame_dict, area_types, depth_root, device):
     """
     Process a single frame.
     """
@@ -804,7 +812,7 @@ def process_frame(video_name, frame_name, frame_dict, area_types, depth_root):
 
         # Rectify the depth image using planar fitting and guided filtering for illusion and support regions.
         rectify_depth_image(left_image, depth_image, mask_image_dict, area_types, 
-                            depth_root, depth_path,
+                            device, depth_root, depth_path,
                             min_area=100, thickness=5, 
                             dis_thold=0.01, ransac_n=3, n_itr=1000, 
                             bound_size=7, radius=8, eps=0.01)
@@ -813,24 +821,65 @@ def process_frame(video_name, frame_name, frame_dict, area_types, depth_root):
         raise Exception(err, f"video_name: {video_name}   frame_name: {frame_name}   " + \
                              f"frame_dict: {frame_dict}   area_types:{area_types}   depth_root: {depth_root}")
 
+# Function to initialize each process with a specific GPU ID
+def init_process(gpu_id):
+    if gpu_id != -1:
+        torch.cuda.set_device(gpu_id)
+        print(f"Process {os.getpid()} is using GPU {gpu_id}")
+
+# def process_video(video_name, video_dict, area_types, depth_root):
+#     """
+#     Process all frames in a single video in parallel.
+#     """
+#     # Calculate the number of processes (CPU cores - 10)
+#     # num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
+#     num_processes = 1
+
+#     # Use multiprocessing to process frames concurrently
+#     with multiprocessing.Pool(processes=num_processes) as pool:
+#         # Prepare tasks as a list of arguments for process_frame
+#         tasks = [
+#             (video_name, frame_name, frame_dict, area_types, depth_root)
+#             for frame_name, frame_dict in video_dict.items()
+#         ]
+#         # Process frames in parallel
+#         pool.starmap(process_frame, tasks)
+
 def process_video(video_name, video_dict, area_types, depth_root):
     """
     Process all frames in a single video in parallel.
     """
     # Calculate the number of processes (CPU cores - 10)
     # num_processes = max(1, os.cpu_count() - 10)  # Ensure at least 1 process is used
-    num_processes = 20
+    num_processes = 1
+
+    # Get the number of available GPUs
+    num_gpus = torch.cuda.device_count()
+    if num_gpus>0:
+        print(f"Using {num_gpus} GPUs for RANSAC plane fitting.")
+    else:
+        print("Using CPU for RANSAC plane fitting.")
+
+    # Assign a fixed GPU ID to each process
+    gpu_ids = [i % num_gpus for i in range(num_processes)]
 
     # Use multiprocessing to process frames concurrently
+    multiprocessing.set_start_method('spawn', force=True)
     with multiprocessing.Pool(processes=num_processes) as pool:
+    # with multiprocessing.Pool(processes=num_processes, initializer=init_process, initargs=(gpu_ids,)) as pool:
         # Prepare tasks as a list of arguments for process_frame
         tasks = [
-            (video_name, frame_name, frame_dict, area_types, depth_root)
-            for frame_name, frame_dict in video_dict.items()
+            (video_name, frame_name, frame_dict, area_types, depth_root, i%num_gpus if num_gpus>0 else -1)
+            for i, (frame_name, frame_dict) in enumerate(video_dict.items())
         ]
+
+        # Initialize processes with fixed GPU allocation
+        for gpu_id in gpu_ids:
+            pool.apply_async(init_process, args=(gpu_id,))  # Initialize the process on each GPU
+
         # Process frames in parallel
         pool.starmap(process_frame, tasks)
-
+        # pool.starmap(process_frame, tasks[:1])
 
 
 if __name__ == '__main__':
@@ -838,20 +887,29 @@ if __name__ == '__main__':
     mask_root  = "/data2/Fooling3D/sam_mask"
     depth_root = "/data5/fooling-depth/depth"
     meta_root  = "/data2/Fooling3D/meta_data"
+    file_name  = "data_dict_update"
 
-    # update_meta_data(image_root, mask_root, depth_root, meta_root)
+    # image_root = "/data2/Fooling3D/video_frame_sequence_beta"
+    # mask_root  = "/data2/Fooling3D/sam_mask_beta"
+    # depth_root = "/data5/fooling-depth/depth"
+    # meta_root  = "/data2/Fooling3D/meta_data"
+    # file_name  = "data_dict_beta"
+
+    # update_meta_data(image_root, mask_root, depth_root, meta_root, file_name)
 
     # Load metadata
     area_types = ["illusion", "nonillusion"]
-    data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
+    data = load_meta_data(os.path.join(meta_root, f"{file_name}.pkl"))
+    print("Load data from", os.path.join(meta_root, f"{file_name}.pkl"))
 
     # Process each video in parallel
     # start_from_video_name = None
     # start_from_video_name = "video0/the_cake_studio_shorts"
     # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
     # start_from_video_name = "video0/wall_painting_new_creative_design"
-    start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
+    # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
     # start_from_video_name = "video0/modern_wall_texture_designs_for_Interior_with_Wallputty"
+    start_from_video_name = "video2/to_Draw_a_3D_Mayan_Pyramid_Amazing_3D_Trick_Art"
     started = False
     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
         # Start from last failure video
@@ -860,6 +918,7 @@ if __name__ == '__main__':
                 started = True
             if not started:
                 continue
+        print("Processing", video_name)
         process_video(video_name, video_dict, area_types, depth_root)
         # break
 
