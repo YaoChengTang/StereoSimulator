@@ -572,6 +572,9 @@ class VideoFolderDataset(Dataset):
         
         self.data = load_meta_data(os.path.join(meta_root, "data_dict.pkl"))
 
+        data_all = load_meta_data(os.path.join(meta_root, "data_dict_update.pkl"))
+        self.data = {k: v for k, v in data_all.items() if k not in self.data}
+
         # Prepare the video frames and metadata
         self.video_frames_info = []
 
