@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>图片标注工具</title>
+    <style>
+        #image-container {
+            position: relative;
+            display: inline-block;
+        }
+        #display-img {
+            max-width: 800px;
+            height: auto;
+        }
+        .point-marker {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <input type="text" id="imagePath" placeholder="输入图片绝对路径">
+        <button onclick="loadImage()">加载图片</button>
+    </div>
+    
+    <div id="image-container">
+        <img id="image" src="" alt="加载的图片" crossorigin="anonymous">
+    </div>
+
+    <div>
+        <input type="text" id="saveName" placeholder="保存文件名">
+        <button onclick="saveMask()">生成illusion Mask</button>
+
+        <input type="text" id="saveName1" placeholder="保存文件名">
+        <button onclick="saveMask1()">生成non illusion Mask</button>
+    </div>
+
+    <script>
+        let scaleX = 1;
+        let scaleY = 1;
+
+        async function loadImage() {
+            const path = document.getElementById("imagePath").value;
+            
+            const response = await fetch("/load_image", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({image_path: path})
+            });
+            
+            const data = await response.json();
+            
+            if(data.status === "success") {
+                const img = document.getElementById("display-img");
+                console.log(path);
+                document.getElementById("image").src = `/get_image?path=${path}`;
+                
+                // 计算缩放比例
+                // img.onload = function() {
+                //     scaleX = data.orig_width / img.naturalWidth;
+                //     scaleY = data.orig_height / img.naturalHeight;
+                // };  
+            } else {
+                alert(data.message);
+            }
+        }
+
+        document.getElementById("image").addEventListener("click", function(e) {
+            const rect = this.getBoundingClientRect();
+            
+            // 计算原始坐标
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+            
+            // 发送坐标到后端
+            fetch("/record_point", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({x: x, y: y})
+            })
+            .then(res => res.json())
+            .then(data => {
+                updateMarkers(data.points);
+            });
+        });
+
+        function updateMarkers(points) {
+            const container = document.getElementById("image-container");
+            container.querySelectorAll(".point-marker").forEach(m => m.remove());
+            
+            points.forEach(pt => {
+                const marker = document.createElement("div");
+                marker.className = "point-marker";
+                marker.style.left = `${pt[0]/scaleX}px`;
+                marker.style.top = `${pt[1]/scaleY}px`;
+                container.appendChild(marker);
+            });
+        }
+
+        async function saveMask() {
+            const name = document.getElementById("saveName").value;
+            if(!name) return alert("请输入文件名");
+            
+            const res = await fetch("/save_mask", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({save_name: name})
+            });
+            
+            const data = await res.json();
+            if(data.status === "success") {
+                alert(`保存成功！路径：${data.mask_path}`);
+            } else {
+                alert(data.message);
+            }
+        }
+
+
+        async function saveMask1() {
+            const name = document.getElementById("saveName1").value;
+            if(!name) return alert("请输入文件名");
+            
+            const res = await fetch("/save_mask1", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({save_name: name})
+            });
+            
+            const data = await res.json();
+            if(data.status === "success") {
+                alert(`保存成功！路径：${data.mask_path}`);
+            } else {
+                alert(data.message);
+            }
+        }
+    </script>
+</body>
+</html>

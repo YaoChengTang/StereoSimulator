@@ -23,7 +23,7 @@ from tqdm import tqdm
 from datetime import datetime
 # from simple_lama_inpainting import SimpleLama
 
-from inpainting import SimpleLama, PrivateSimpleLama, pad_img_to_modulo
+from inpainting import SimpleLama, PrivateSimpleLama, pad_img_to_modulo, unpad_img
 from utils import check_paths, load_meta_data, write_meta_data
 from utils import load_rgb_image, load_depth_image, load_mask_image
 
@@ -618,12 +618,10 @@ class VideoFolderDataset(Dataset):
         # Load the images
         left_image = load_rgb_image(frame_path)
         depth_image = load_depth_image(depth_path)
-
+        # print(left_image.shape)
         right_image, invalid_mask, occ_mask, scale_factor = generate_right_image(left_image, depth_image, threshold=0.9, epsilon=1e-6, max_iterations=1)
-
         right_image_trans  = self.augment(right_image, enable_norm=True)
         invalid_mask_trans = self.augment(invalid_mask)
-
         # Load the mask image (assuming it's a binary mask image)
         # mask_image = read_image(mask_path)
         
@@ -765,7 +763,7 @@ def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, imag
     def save_image(i):
         frame_name = frame_name_batch[i]
         image = image_batch[i:i+1]
-
+        # print(image.size())
         sv_name = frame_name
         if debug_info is not None and len(debug_info)>0:
             prefix, suffix = os.path.splitext(frame_name)
@@ -852,7 +850,6 @@ if __name__ == '__main__':
         video_name, frame_name, \
         left_image, depth_image, right_image, invalid_mask, occ_mask, \
         scale_factor, right_image_trans, invalid_mask_trans = data
-        
         msg = f"{video_name[0]} - {frame_name[0]}: left_image: {left_image.shape}, depth_image: {depth_image.shape}, " + \
               f"right_image: {right_image.shape}, invalid_mask: {invalid_mask.shape}, occ_mask: {occ_mask.shape}, scale_factor: {scale_factor[0]}" + \
               f"right_image_trans: {right_image_trans.shape}, invalid_mask_trans: {invalid_mask_trans.shape}"
@@ -862,6 +859,8 @@ if __name__ == '__main__':
             # right_image_repair = right_image_trans
             right_image_trans = right_image_trans[:,[2,1,0],...]
             right_image_repair = inpainter(right_image_trans.cuda(), invalid_mask_trans.cuda())
+            right_image_repair = unpad_img(right_image_repair, right_image.shape, 8)
+
             # print(f"right_image_repair: {right_image_repair.shape}")
 
             # Save images
@@ -870,7 +869,6 @@ if __name__ == '__main__':
             # save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, debug_info="tensor")
         except Exception as err:
             raise Exception(err, f"{video_name}  {frame_name}")
-
         # cost_time = time.time() - start_time
         # print(f"cost_time: {cost_time}")
         # start_time = time.time()
