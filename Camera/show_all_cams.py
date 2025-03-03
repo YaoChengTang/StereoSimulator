@@ -48,8 +48,9 @@ def init_L515(args, enable_rgb=True, enable_depth=True):
 
     if enable_depth: 
         config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
+        config.enable_stream(rs.stream.confidence, 1024, 768, rs.format.raw8, 30)
     if enable_rgb: 
-        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.color, 960, 540, rs.format.bgr8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
@@ -268,6 +269,7 @@ def main(args):
                 # Get aligned frames
                 aligned_depth_frame = aligned_frames.get_depth_frame() # aligned_depth_frame is a 640x480 depth image
                 color_frame = aligned_frames.get_color_frame()
+                confidence_frame = aligned_frames.first_or_default(rs.stream.confidence)
 
                 # Validate that both frames are valid
                 if not aligned_depth_frame or not color_frame:
@@ -275,6 +277,7 @@ def main(args):
 
                 depth_image = np.asanyarray(aligned_depth_frame.get_data())
                 color_image = np.asanyarray(color_frame.get_data())
+                confidence_image = np.asanyarray(confidence_frame.get_data())
 
 
                 # Remove background - Set pixels further than clipping_distance to grey
@@ -307,6 +310,7 @@ def main(args):
                         "L515_depth_image": depth_image,
                         "zed_left_color_image": left_rectified_image_cv,
                         "zed_right_color_image": right_rectified_image_cv,
+                        "confidence_image": confidence_image,
                     }
                     save_data(args, data, idx)
                     idx += 1
@@ -319,6 +323,7 @@ def main(args):
                         "L515_depth_image": depth_image,
                         "zed_left_color_image": left_rectified_image_cv,
                         "zed_right_color_image": right_rectified_image_cv,
+                        "confidence_image": confidence_image,
                     }
                     save_data(args, data, idx)
                     idx += 1

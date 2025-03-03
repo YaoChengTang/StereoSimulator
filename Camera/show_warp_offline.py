@@ -18,9 +18,9 @@ def main(args):
     zed_calib = ZedCalibration(os.path.join(args.root, args.scene_name, "ZED_calib.yaml"))
     l515_calib = L515Calibration(os.path.join(args.root, args.scene_name, "L515_calib.yaml"))
     if os.path.exists(os.path.join(args.root, "../../calib_file", "L515_ZEDleft.yaml")):
-        warp_calib = WarpCalibration(os.path.join(args.root, "../../calib_file", "L515_ZEDleft.yaml"))
+        warp_calib = WarpCalibration(os.path.join(args.root, "../../calib", "L515_ZEDleft.yaml"))
     else:
-        warp_calib = WarpCalibration(os.path.join(args.root, "../calib_file", "L515_ZEDleft.yaml"))
+        warp_calib = WarpCalibration(os.path.join(args.root, "../calib", "L515_ZEDleft.yaml"))
 
     K_L515 = l515_calib.get_raw_intrinsic_matrix()
     K_ZED = zed_calib.get_rectified_calib()['left']['intrinsic']
