@@ -195,7 +195,8 @@ def Process(Z, source_image, mask_small = None, mask_large = None):
 
 
 def update_meta_data(image_root, mask_root, depth_root, meta_root, file_name="data_dict"):
-    meta_path  = os.path.join(meta_root, "frames_metadata.csv")
+    # meta_path  = os.path.join(meta_root, "frames_metadata.csv")
+    meta_path  = os.path.join(meta_root, "frames_metadata_beta.csv")
     df = load_meta_data(meta_path)
     video_name_list = df["frames_rel_dir"]
 
@@ -883,17 +884,17 @@ def process_video(video_name, video_dict, area_types, depth_root):
 
 
 if __name__ == '__main__':
-    image_root = "/data2/Fooling3D/video_frame_sequence"
-    mask_root  = "/data2/Fooling3D/sam_mask"
-    depth_root = "/data5/fooling-depth/depth"
-    meta_root  = "/data2/Fooling3D/meta_data"
-    file_name  = "data_dict_update"
-
-    # image_root = "/data2/Fooling3D/video_frame_sequence_beta"
-    # mask_root  = "/data2/Fooling3D/sam_mask_beta"
+    # image_root = "/data2/Fooling3D/video_frame_sequence"
+    # mask_root  = "/data2/Fooling3D/sam_mask"
     # depth_root = "/data5/fooling-depth/depth"
     # meta_root  = "/data2/Fooling3D/meta_data"
-    # file_name  = "data_dict_beta"
+    # file_name  = "data_dict_update"
+
+    image_root = "/data2/Fooling3D/video_frame_sequence_beta"
+    mask_root  = "/data2/Fooling3D/sam_mask_beta"
+    depth_root = "/data5/fooling-depth/depth"
+    meta_root  = "/data2/Fooling3D/meta_data"
+    file_name  = "data_dict_beta"
 
     # update_meta_data(image_root, mask_root, depth_root, meta_root, file_name)
 
@@ -903,13 +904,13 @@ if __name__ == '__main__':
     print("Load data from", os.path.join(meta_root, f"{file_name}.pkl"))
 
     # Process each video in parallel
-    # start_from_video_name = None
+    start_from_video_name = None
     # start_from_video_name = "video0/the_cake_studio_shorts"
     # start_from_video_name = "video5/In_Indian_Bike_Driving_3d_Game_Nitin_Patel_shorts"
     # start_from_video_name = "video0/wall_painting_new_creative_design"
     # start_from_video_name = "video2/drawing_easiest_trick_art_easytrick_drawing"
     # start_from_video_name = "video0/modern_wall_texture_designs_for_Interior_with_Wallputty"
-    start_from_video_name = "video2/to_Draw_a_3D_Mayan_Pyramid_Amazing_3D_Trick_Art"
+    # start_from_video_name = "video2/to_Draw_a_3D_Mayan_Pyramid_Amazing_3D_Trick_Art"
     started = False
     for video_name, video_dict in tqdm(data.items(), desc="Processing videos"):
         # Start from last failure video
