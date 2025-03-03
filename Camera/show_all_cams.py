@@ -1,6 +1,7 @@
 import os
 import cv2
 import yaml
+import shutil
 import argparse
 import numpy as np
 import pyzed.sl as sl
@@ -47,8 +48,9 @@ def init_L515(args, enable_rgb=True, enable_depth=True):
 
     if enable_depth: 
         config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
+        config.enable_stream(rs.stream.confidence, 1024, 768, rs.format.raw8, 30)
     if enable_rgb: 
-        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.color, 960, 540, rs.format.bgr8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
@@ -267,6 +269,7 @@ def main(args):
                 # Get aligned frames
                 aligned_depth_frame = aligned_frames.get_depth_frame() # aligned_depth_frame is a 640x480 depth image
                 color_frame = aligned_frames.get_color_frame()
+                confidence_frame = aligned_frames.first_or_default(rs.stream.confidence)
 
                 # Validate that both frames are valid
                 if not aligned_depth_frame or not color_frame:
@@ -274,6 +277,7 @@ def main(args):
 
                 depth_image = np.asanyarray(aligned_depth_frame.get_data())
                 color_image = np.asanyarray(color_frame.get_data())
+                confidence_image = np.asanyarray(confidence_frame.get_data())
 
 
                 # Remove background - Set pixels further than clipping_distance to grey
@@ -306,6 +310,7 @@ def main(args):
                         "L515_depth_image": depth_image,
                         "zed_left_color_image": left_rectified_image_cv,
                         "zed_right_color_image": right_rectified_image_cv,
+                        "confidence_image": confidence_image,
                     }
                     save_data(args, data, idx)
                     idx += 1
@@ -318,6 +323,7 @@ def main(args):
                         "L515_depth_image": depth_image,
                         "zed_left_color_image": left_rectified_image_cv,
                         "zed_right_color_image": right_rectified_image_cv,
+                        "confidence_image": confidence_image,
                     }
                     save_data(args, data, idx)
                     idx += 1
@@ -325,6 +331,19 @@ def main(args):
                 elif key == ord('q'):  # Exit on pressing 'q'
                     print("Pressed 'q' key!")
                     break
+
+                elif key == ord('n'):  # Exit on pressing 'q'
+                    print("Pressed 'n' key!")
+                    print("Next video")
+                    scene_name = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    os.makedirs(os.path.join(args.root, scene_name), exist_ok=True)
+                    shutil.copy(os.path.join(args.root, args.scene_name, 'ZED_calib.yaml'), 
+                                os.path.join(args.root, scene_name, 'ZED_calib.yaml'))
+                    shutil.copy(os.path.join(args.root, args.scene_name, 'L515_calib.yaml'), 
+                                os.path.join(args.root, scene_name, 'L515_calib.yaml'))
+                    args.scene_name = args.scene_name.split("-")[0] + "-" + scene_name
+                    idx = 0
+                    cnt = 0
 
                 elif key == 27:  # Exit on pressing 'ESC'
                     break

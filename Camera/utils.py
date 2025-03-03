@@ -275,6 +275,14 @@ def upsample_depth_with_hole(img_depth, K, up_scale=3):
 
     return img_depth, K
 
+def distance_to_Zdepth(distance, f_x, f_y, c_x, c_y, c_z=1):
+    h, w = distance.shape
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
+    x = (u - c_x) / f_x
+    y = (v - c_y) / f_y
+    z = distance * c_z / np.sqrt(x**2 + y**2 + c_z**2)
+
+    return z
 
 def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T, depth_scale, 
                        args=None, frame_idx=None):
@@ -763,3 +771,125 @@ def save_ply(rgb_image, depth_image, depth_scale, intrinsics, file_name, args=No
         # Write all points at once using numpy.savetxt
         np.savetxt(f, points, fmt='%f %f %f %d %d %d')
     print(f"Saved {sv_path}")
+
+
+
+
+
+import os
+import sys
+import cv2
+import glob
+import pickle
+import shutil
+import multiprocessing
+
+import numpy as np
+import pandas as pd
+
+
+
+def check_paths(path_list, video_idx=None):
+    succ = True
+    for path in path_list:
+        if not os.path.exists(path):
+            # print(f"No such path {video_idx}: {path}")
+            succ = False
+    return succ
+
+
+def load_meta_data(path):
+    if not os.path.exists(path):
+        return {}
+
+    prefix, suffix = os.path.splitext(os.path.basename(path))
+    if suffix==".csv":
+        data =  pd.read_csv(path)
+
+    elif suffix==".pkl":
+        with open(path, 'rb') as f:
+            data = pickle.load(f)
+
+    return data
+
+def write_meta_data(data, path):
+    prefix, suffix = os.path.splitext(os.path.basename(path))
+    if suffix==".csv":
+        if isinstance(data, pd.DataFrame):
+            data.to_csv(path, index=False)
+        else:
+            data = pd.DataFrame(data)
+            data.to_csv(path, index=False)
+
+    elif suffix==".pkl":
+        with open(path, 'wb') as f:
+            pickle.dump(data, f)
+
+
+def load_rgb_image(path):
+    if not os.path.exists(path):
+        return None
+    return cv2.imread(path)
+
+def load_depth_image(path):
+    if not os.path.exists(path):
+        return None
+    return cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
+def load_mask_image(path):
+    if not os.path.exists(path):
+        return None
+    mask = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if mask is not None:
+        mask[mask>=128] = 255
+        mask[mask<128] = 0
+    return mask
+
+def readPFM(file):
+    file = open(file, 'rb')
+
+    color = None
+    width = None
+    height = None
+    scale = None
+    endian = None
+
+    header = file.readline().rstrip()
+    if header == b'PF':
+        color = True
+    elif header == b'Pf':
+        color = False
+    else:
+        raise Exception('Not a PFM file.')
+
+    dim_match = re.match(rb'^(\d+)\s(\d+)\s$', file.readline())
+    if dim_match:
+        width, height = map(int, dim_match.groups())
+    else:
+        raise Exception('Malformed PFM header.')
+
+    scale = float(file.readline().rstrip())
+    if scale < 0: # little-endian
+        endian = '<'
+        scale = -scale
+    else:
+        endian = '>' # big-endian
+
+    data = np.fromfile(file, endian + 'f')
+    shape = (height, width, 3) if color else (height, width)
+
+    data = np.reshape(data, shape)
+    data = np.flipud(data)
+    return data
+
+def writePFM(file, array):
+    import os
+    assert type(file) is str and type(array) is np.ndarray and \
+           os.path.splitext(file)[1] == ".pfm"
+    with open(file, 'wb') as f:
+        H, W = array.shape
+        headers = ["Pf\n", f"{W} {H}\n", "-1\n"]
+        for header in headers:
+            f.write(str.encode(header))
+        array = np.flip(array, axis=0).astype(np.float32)
+        f.write(array.tobytes())
