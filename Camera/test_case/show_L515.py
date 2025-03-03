@@ -39,7 +39,7 @@ if not found_rgb:
     exit(0)
 
 config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
-config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+config.enable_stream(rs.stream.color, 960, 540, rs.format.bgr8, 30)
 
 # Start streaming
 profile = pipeline.start(config)
@@ -100,6 +100,8 @@ clipping_distance = clipping_distance_in_meters / depth_scale
 # The "align_to" is the stream type to which we plan to align depth frames.
 align_to = rs.stream.color
 align = rs.align(align_to)
+# align_to = rs.stream.depth
+# align = rs.align(align_to)
 
 # Streaming loop
 cnt = 0

@@ -71,6 +71,18 @@ def pad_img_to_modulo(img, mod):
     )
 
 
+def unpad_img(img, shape, mod):
+    channels, height, width, b = shape
+    out_height = ceil_modulo(height, mod)
+    out_width = ceil_modulo(width, mod)
+    
+    # 计算 padding 大小
+    pad_height = out_height - height
+    pad_width = out_width - width
+    
+    # 去除 padding 部分
+    return img[..., :height, :width]
+
 def prepare_img_and_mask(image, mask, device, pad_out_to_modulo=8, scale_factor=None):
     out_image = get_image(image)
     out_mask = get_image(mask)
@@ -169,6 +181,7 @@ class PrivateSimpleLama:
         self.device = device
 
     def __call__(self, image, mask):
+        # print(shape)
         with torch.inference_mode():
             inpainted_image = self.model(image, mask)
             return inpainted_image

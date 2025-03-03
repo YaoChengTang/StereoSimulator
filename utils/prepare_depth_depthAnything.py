@@ -5,13 +5,14 @@ import sys
 sys.path.append('/data4/lzd/iccv25/code/Depth-Anything-V2')
 from depth_anything_v2.dpt import DepthAnythingV2
 from matplotlib import pyplot as plt
-from utils import video_frame as vf
-from utils import image_process
+import video_frame as vf
+import image_process
 import os
 import numpy as np
 from fire import Fire
 from PIL import Image
 import csv
+from glob import glob
 DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 
 
@@ -34,10 +35,6 @@ def main(
     folder = f'/data2/Fooling3D/video_frame_sequence/video{idx}'
     video_list = os.listdir(folder)
     video_paths = [os.path.join(folder, i) for i in video_list]
-    # print(video_paths[93])
-    # print(video_paths[94])
-    # print(video_paths[95])
-    # exit(0)
     video_paths = video_paths[95:]
     # 打开原文件并直接写回
     for frame_folder in video_paths:
