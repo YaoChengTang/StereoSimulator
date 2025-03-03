@@ -867,6 +867,12 @@ if __name__ == '__main__':
             right_image_repair = inpainter(right_image_trans.cuda(), invalid_mask_trans.cuda())
             # print(f"right_image_repair: {right_image_repair.shape}")
 
+            _, _, H_l, W_l = left_image.shape
+            _, _, H_r, W_r = right_image_repair.shape
+            if H_l < H_r or W_l < W_r:
+                right_image_repair = right_image_repair[:, :, :H_l, :W_l]
+            assert left_image.shape == right_image_repair.shape, f"{left_image.shape} != {right_image_repair.shape}"
+
             # Save images
             save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, 
                                     meta_root=meta_root, scale_factor_batch=scale_factor, silence=True)
