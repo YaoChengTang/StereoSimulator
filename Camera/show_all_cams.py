@@ -341,7 +341,7 @@ def main(args):
                                 os.path.join(args.root, scene_name, 'ZED_calib.yaml'))
                     shutil.copy(os.path.join(args.root, args.scene_name, 'L515_calib.yaml'), 
                                 os.path.join(args.root, scene_name, 'L515_calib.yaml'))
-                    args.scene_name = scene_name
+                    args.scene_name = args.scene_name.split("-")[0] + "-" + scene_name
                     idx = 0
                     cnt = 0
 

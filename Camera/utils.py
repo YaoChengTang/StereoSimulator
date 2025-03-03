@@ -275,6 +275,14 @@ def upsample_depth_with_hole(img_depth, K, up_scale=3):
 
     return img_depth, K
 
+def distance_to_Zdepth(distance, f_x, f_y, c_x, c_y, c_z=1):
+    h, w = distance.shape
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
+    x = (u - c_x) / f_x
+    y = (v - c_y) / f_y
+    z = distance * c_z / np.sqrt(x**2 + y**2 + c_z**2)
+
+    return z
 
 def remap_depth_to_zed(img_depth, img_ZED, K_L515, dist_L515, K_ZED, dist_ZED, R, T, depth_scale, 
                        args=None, frame_idx=None):

@@ -8,7 +8,7 @@ from PIL import Image
 from datetime import datetime
 from utils import get_image_paths, stack_images_hor, stack_images_ver, stack_images, colorize_depth_rgb
 from utils import save_data, save_ply
-from utils import remap_depth_to_zed, repair_depth, build_invalid_areas, detect_noise_in_depth
+from utils import distance_to_Zdepth, remap_depth_to_zed, repair_depth, build_invalid_areas, detect_noise_in_depth
 from calibration import ZedCalibration, L515Calibration, WarpCalibration
 
 
@@ -19,8 +19,10 @@ def main(args):
     l515_calib = L515Calibration(os.path.join(args.root, args.scene_name, "L515_calib.yaml"))
     if os.path.exists(os.path.join(args.root, "../../calib_file", "L515_ZEDleft.yaml")):
         warp_calib = WarpCalibration(os.path.join(args.root, "../../calib", "L515_ZEDleft.yaml"))
-    else:
+    elif os.path.exists(os.path.join(args.root, "../calib_file", "L515_ZEDleft.yaml")):
         warp_calib = WarpCalibration(os.path.join(args.root, "../calib", "L515_ZEDleft.yaml"))
+    else:
+        warp_calib = WarpCalibration(os.path.join(args.root, "calib", "L515_ZEDleft.yaml"))
 
     K_L515 = l515_calib.get_raw_intrinsic_matrix()
     K_ZED = zed_calib.get_rectified_calib()['left']['intrinsic']
@@ -42,6 +44,8 @@ def main(args):
         img_L515 = cv2.imread(L515_img_path)
         img_ZED = cv2.imread(ZED_img_path)
         img_depth = cv2.imread(depth_img_path, cv2.IMREAD_UNCHANGED)
+
+        # img_depth = distance_to_Zdepth(img_depth * depth_scale, K_L515[0,0], K_L515[1,1], K_L515[0,2], K_L515[1,2], c_z=1) / depth_scale
 
         # Align depth map to ZED left camera
         img_depth_remap, invalid_mask_remap = remap_depth_to_zed(img_depth, img_ZED, 
