@@ -692,7 +692,7 @@ class VideoFolderBatchSampler(Sampler):
 
 from concurrent.futures import ThreadPoolExecutor
 def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, image_batch, 
-                            meta_root, scale_factor_batch,
+                            meta_root, csv_file_name, scale_factor_batch,
                             debug_info="", silence=False):
     """
     Save generated right image in a structured directory inside image_root.
@@ -779,7 +779,7 @@ def save_right_image_tensor(image_root, video_name_batch, frame_name_batch, imag
         executor.map(save_image, range(len(frame_name_batch)))
     
     # Save the scale_factor_batch into a CSV file with corresponding left image path
-    scale_factor_file = os.path.join(meta_root, "scale_factors.csv")
+    scale_factor_file = os.path.join(meta_root, csv_file_name)
     os.makedirs(os.path.dirname(scale_factor_file), exist_ok=True)
 
     # Open the file in append mode and write new scale factors
@@ -866,15 +866,17 @@ if __name__ == '__main__':
 
             # print(f"right_image_repair: {right_image_repair.shape}")
 
-            _, _, H_l, W_l = left_image.shape
+            _, H_l, W_l, _ = left_image.shape
             _, _, H_r, W_r = right_image_repair.shape
             if H_l < H_r or W_l < W_r:
                 right_image_repair = right_image_repair[:, :, :H_l, :W_l]
-            assert left_image.shape == right_image_repair.shape, f"{left_image.shape} != {right_image_repair.shape}"
+            assert left_image.shape[1:3] == right_image_repair.shape[2:4], f"{left_image.shape} != {right_image_repair.shape}"
 
             # Save images
+            # save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, 
+            #                         meta_root=meta_root, csv_file_name="scale_factors.csv", scale_factor_batch=scale_factor, silence=True)
             save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, 
-                                    meta_root=meta_root, scale_factor_batch=scale_factor, silence=True)
+                                    meta_root=meta_root, csv_file_name="scale_factors_rest.csv", scale_factor_batch=scale_factor, silence=True)
             # save_right_image_tensor(image_root, video_name, frame_name, right_image_repair, debug_info="tensor")
         except Exception as err:
             raise Exception(err, f"{video_name}  {frame_name}")
