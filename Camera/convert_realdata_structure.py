@@ -112,10 +112,10 @@ def copy_sam2dataset(src_root, tar_root):
 
 
 # Example usage
-# root_dir = '/data2/Fooling3D/real_data/Dataset'
-# new_root_dir = '/data2/Fooling3D/real_data/Dataset_new_structure'
-# convert_dataset_structure(root_dir, new_root_dir)
+root_dir = '/data2/Fooling3D/real_data/Dataset_second/Dataset'
+new_root_dir = '/data2/Fooling3D/real_data/Dataset_second/Dataset_new_structure'
+convert_dataset_structure(root_dir, new_root_dir)
 
-src_root = '/data2/Fooling3D/real_data/SAM'
-tar_root = '/data2/Fooling3D/real_data/sam_mask'
-copy_sam2dataset(src_root, tar_root)
+# src_root = '/data2/Fooling3D/real_data/SAM'
+# tar_root = '/data2/Fooling3D/real_data/sam_mask'
+# copy_sam2dataset(src_root, tar_root)

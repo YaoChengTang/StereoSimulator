@@ -9,6 +9,5 @@ sam
 depth_post_processing.py
     process all frames
     use ref frame depth to rectify tar frame depth
-convert_realdata_structure.py (sam)
 
 split_dataset_structure.py
