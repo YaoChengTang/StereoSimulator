@@ -790,16 +790,16 @@ if __name__ == '__main__':
     ref_depth_path = os.path.join(depth_root, "Video/Registration/0000/L515_depth_image.png")
     ref_depth = load_depth_image(ref_depth_path)
 
-    for tar_video in ["Cycling2", "Driving4", "Objects"]:
-        tar_video_dir = os.path.join(depth_root, f"Video/{tar_video}")
-        for tar_frame_id in os.listdir(tar_video_dir):
-            tar_frame_dir = os.path.join(tar_video_dir, tar_frame_id)
+    for tar_obj in ["Cycling2", "Driving4", "Objects"]:
+        tar_obj_dir = os.path.join(depth_root, f"Video/{tar_obj}")
+        for tar_frame_id in os.listdir(tar_obj_dir):
+            tar_frame_dir = os.path.join(tar_obj_dir, tar_frame_id)
             tar_depth_path = os.path.join(tar_frame_dir, "L515_depth_image.png")
             
             tar_depth = load_depth_image(tar_depth_path)
 
-            mask = load_mask_image(os.path.join(mask_root, f"Video/{tar_video}/L515_color_image/{tar_frame_id}-01-01-illusion.jpg"))
-            # print(os.path.join(mask_root, f"Video/{tar_video}/L515_depth_image/{tar_frame_id}-01-01-illusion.jpg"), type(mask))
+            mask = load_mask_image(os.path.join(mask_root, f"Video/{tar_obj}/L515_color_image/{tar_frame_id}-01-01-illusion.jpg"))
+            # print(os.path.join(mask_root, f"Video/{tar_obj}/L515_depth_image/{tar_frame_id}-01-01-illusion.jpg"), type(mask))
             mask = (mask>128) & (tar_depth>0)
 
             tar_depth[mask] = ref_depth[mask]
