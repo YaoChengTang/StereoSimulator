@@ -59,6 +59,7 @@ def cal_abs_rel(pred, gt, mask, valid_mask):
     return abs_rel
 
 def cal_abs_rel_metric(pred, gt, mask):
+    mask = mask & (gt>0)
     pred = pred[mask]
     gt = gt[mask]
     # assert np.all(gt>0),[gt.min(),gt.max()]
@@ -75,10 +76,11 @@ def cal_depth_rms(pred, gt, mask):
 def cal_depth_log10(pred, gt, mask):
     pred = pred[mask]
     gt = gt[mask]
-    log10 = np.mean(np.abs(np.log10(pred)-np.log10(gt)))
+    log10 = np.mean(np.abs(np.log10(pred+1e-8)-np.log10(gt+1e-8)))
     return log10
 
 def cal_delta_n(pred, gt, mask, n, threshold=1.25):
+    mask = mask & (gt>0)
     pred = pred[mask]
     gt = gt[mask]
     delta_n = np.mean(np.maximum(pred/gt, gt/pred)<threshold**n)
@@ -194,16 +196,18 @@ if __name__=='__main__':
     parser.add_argument('--focal-align', action='store_true')
     parser.add_argument('--max-depth-align', action='store_true')
     parser.add_argument('--scale-shift-align', action='store_true')
+    parser.add_argument('--scale-align', action='store_true')
     parser.add_argument('--optim-align', action='store_true')
     parser.add_argument('--vis', action='store_true')
 
     args = parser.parse_args()
-
+    os.makedirs(args.output_path, exist_ok=True)
     pred_files = glob.glob(os.path.join(args.pred_path, '**/*.png'), recursive=True)+glob.glob(os.path.join(args.pred_path, '**/*.npy'), recursive=True)+\
         glob.glob(os.path.join(args.pred_path, '**/*.pfm'), recursive=True)
 
     pred_files.sort()
     # print(len(pred_files))
+    # print(pred_files)
     # exit()
     # all
     epe = []
@@ -220,6 +224,20 @@ if __name__=='__main__':
     delta2=[]
     delta3=[]
 
+    abs_rel_depth_affine=[]
+    rms_depth_affine=[]
+    log10_depth_affine=[]
+    delta1_depth_affine=[]
+    delta2_depth_affine=[]
+    delta3_depth_affine=[]
+
+    abs_rel_inv_depth_affine=[]
+    rms_inv_depth_affine=[]
+    log10_inv_depth_affine=[]
+    delta1_inv_depth_affine=[]
+    delta2_inv_depth_affine=[]
+    delta3_inv_depth_affine=[]
+
     # ill
     ill_epe=[]
     ill_bad2=[]
@@ -234,6 +252,20 @@ if __name__=='__main__':
     ill_delta1=[]
     ill_delta2=[]
     ill_delta3=[]
+
+    ill_abs_rel_depth_affine=[]
+    ill_rms_depth_affine=[]
+    ill_log10_depth_affine=[]
+    ill_delta1_depth_affine=[]
+    ill_delta2_depth_affine=[]
+    ill_delta3_depth_affine=[]
+
+    ill_abs_rel_inv_depth_affine=[]
+    ill_rms_inv_depth_affine=[]
+    ill_log10_inv_depth_affine=[]
+    ill_delta1_inv_depth_affine=[]
+    ill_delta2_inv_depth_affine=[]
+    ill_delta3_inv_depth_affine=[]
 
     # nill
     nill_epe=[]
@@ -250,27 +282,46 @@ if __name__=='__main__':
     nill_delta2=[]
     nill_delta3=[]
 
+    nill_abs_rel_depth_affine=[]
+    nill_rms_depth_affine=[]
+    nill_log10_depth_affine=[]
+    nill_delta1_depth_affine=[]
+    nill_delta2_depth_affine=[]
+    nill_delta3_depth_affine=[]
+
+    nill_abs_rel_inv_depth_affine=[]
+    nill_rms_inv_depth_affine=[]
+    nill_log10_inv_depth_affine=[]
+    nill_delta1_inv_depth_affine=[]
+    nill_delta2_inv_depth_affine=[]
+    nill_delta3_inv_depth_affine=[]
+
     # metric list
     metric_list = ['epe','bad2','bad3','bad4','bad5','bad6','bad7','abs_rel','rms','log10','delta1','delta2','delta3']
     metric_list = metric_list + ['ill_'+metric for metric in metric_list] + ['nill_'+metric for metric in metric_list]
+    
+    depth_metric_list = ['abs_rel','rms','log10','delta1','delta2','delta3']
+
+    metric_list = metric_list + [metric+'_depth_affine' for metric in depth_metric_list]+['ill_'+metric+'_depth_affine' for metric in depth_metric_list] + ['nill_'+metric+'_depth_affine' for metric in depth_metric_list] + \
+        [metric+'_inv_depth_affine' for metric in depth_metric_list]+['ill_'+metric+'_inv_depth_affine' for metric in depth_metric_list] + ['nill_'+metric+'_inv_depth_affine' for metric in depth_metric_list]
     
     # stats
     stats = {}
 
     # parameters
-    intrinsic = np.array([[1516.77, 0, 939.13],[0, 1516.77, 550.55],[0, 0, 1]])
+    intrinsic = np.array([[1450.4127197265625, 0, 938.3252563476562],[0, 1450.4127197265625, 547.462646484375],[0, 0, 1]])
     intrinsic[:2, :] = intrinsic[:2, :] * args.resize_scale
     fx = intrinsic[0,0]
-    b = 0.06297
+    b = 0.06281671905517578
     doffs = 0.0
 
     for k, pred_file in tqdm(enumerate(pred_files)):
         # print(f'Progress {k+1}/{len(pred_files)}: {pred_file}')
         
         # files
-        rgb_file = os.path.join(args.data_path, os.path.dirname(pred_file).split('/')[-1], os.path.basename(pred_file).split('.')[0]+'.png')
-        gt_file = os.path.join(args.gt_path, os.path.dirname(pred_file).split('/')[-1], os.path.basename(pred_file).split('.')[0]+'.pfm')
-        mask_file = os.path.join(args.gt_path.replace('disp','mask'), os.path.dirname(pred_file).split('/')[-1], os.path.basename(pred_file).split('.')[0]+'.jpg')
+        rgb_file = os.path.join(args.data_path, os.path.dirname(pred_file).split('/')[-1], os.path.basename(pred_file).split('.')[0].split("_depth")[0]+'.png')
+        gt_file = os.path.join(args.gt_path, os.path.dirname(pred_file).split('/')[-1], os.path.basename(pred_file).split('.')[0].split("_depth")[0]+'.pfm')
+        mask_file = os.path.join(args.gt_path.replace('disp','mask'), os.path.dirname(pred_file).split('/')[-1].split("_depth")[0], os.path.basename(pred_file).split('.')[0].split("_depth")[0]+'.jpg')
         
         # read rgb
         if not os.path.exists(rgb_file):
@@ -305,7 +356,7 @@ if __name__=='__main__':
         if args.resize_scale!=1.0 and rgb.shape[:2]!=pred.shape[:2]:
             pred = cv2.resize(pred, im_size, interpolation=cv2.INTER_LINEAR)
             if args.pred_type=='disp':
-                pred = pred*args.resize_scale
+                pred = pred*(rgb.shape[:2]/pred.shape[:2])
 
         valid_mask = (pred<np.inf) & (pred>0)  # pred==0不好界定，算作无效
 
@@ -343,40 +394,65 @@ if __name__=='__main__':
 
         gt_mask = (gt_disp<np.inf) & (gt_disp>0)
 
-        valid_mask = (gt_disp<np.inf) & (gt_disp>0) & (gt_depth<3) & (gt_depth>0.3) & valid_mask 
+        valid_mask = (gt_disp<np.inf) & (gt_disp>0) & (gt_depth<5) & (gt_depth>0.3) & valid_mask 
         ill_mask = ill_mask & valid_mask
         nill_mask = nill_mask & valid_mask
 
 
         # align
+        align_region = nill_mask
         if args.scale_shift_align:
             if args.pred_type=='inv_depth':                
-                gt_shift = np.median(gt_inv_depth[nill_mask])
-                gt_scale = np.mean(np.abs(gt_inv_depth[nill_mask]-gt_shift))
+                gt_shift = np.median(gt_inv_depth[align_region])
+                gt_scale = np.mean(np.abs(gt_inv_depth[align_region]-gt_shift))
 
-                pred_shift = np.median(pred_inv_depth[nill_mask])
-                pred_scale = np.mean(np.abs(pred_inv_depth[nill_mask]-pred_shift))
+                pred_shift = np.median(pred_inv_depth[align_region])
+                pred_scale = np.mean(np.abs(pred_inv_depth[align_region]-pred_shift))
 
                 pred_inv_depth = gt_scale/pred_scale * (pred_inv_depth-pred_shift) + gt_shift
                 
-                pred_depth = np.clip(1/pred_inv_depth, 0.3, 3)
+                pred_depth = np.clip(1/pred_inv_depth, 0.3, 5)
                 pred_disp = fx*b/pred_depth - doffs
                 pred_inv_depth = 1/pred_depth
 
             elif args.pred_type=='depth':
-                gt_shift = np.median(gt_depth[nill_mask])
-                gt_scale = np.mean(np.abs(gt_depth[nill_mask]-gt_shift))
+                gt_shift = np.median(gt_depth[align_region])
+                gt_scale = np.mean(np.abs(gt_depth[align_region]-gt_shift))
 
-                pred_shift = np.median(pred_depth[nill_mask])
-                pred_scale = np.mean(np.abs(pred_depth[nill_mask]-pred_shift))
+                pred_shift = np.median(pred_depth[align_region])
+                pred_scale = np.mean(np.abs(pred_depth[align_region]-pred_shift))
 
                 pred_depth = gt_scale/pred_scale * (pred_depth-pred_shift) + gt_shift
                 
-                pred_depth = np.clip(pred_depth, 0.3, 3)
+                pred_depth = np.clip(pred_depth, 0.3, 5)
                 pred_disp = fx*b/pred_depth - doffs
                 pred_inv_depth = 1/pred_depth
-        else:   
-            pred_depth = np.clip(pred_depth, 0.3, 3)
+        
+        elif args.scale_align:
+            if args.pred_type=='inv_depth':             
+                gt_scale = np.mean(gt_inv_depth[align_region])
+
+                pred_scale = np.mean(pred_inv_depth[align_region])
+
+                pred_inv_depth = gt_scale/pred_scale * (pred_inv_depth)
+                
+                pred_depth = np.clip(1/pred_inv_depth, 0.3, 5)
+                pred_disp = fx*b/pred_depth - doffs
+                pred_inv_depth = 1/pred_depth
+
+            elif args.pred_type=='depth':
+                gt_scale = np.mean(gt_depth[align_region])
+
+                pred_scale = np.mean(pred_depth[align_region])
+
+                pred_depth = gt_scale/pred_scale * (pred_depth)
+                
+                pred_depth = np.clip(pred_depth, 0.3, 5)
+                pred_disp = fx*b/pred_depth - doffs
+                pred_inv_depth = 1/pred_depth
+                
+        else:
+            pred_depth = np.clip(pred_depth, 0.3, 5)
             pred_disp = fx*b/pred_depth - doffs
             pred_inv_depth = 1/pred_depth
 
@@ -456,24 +532,76 @@ if __name__=='__main__':
         nill_delta2.append(cal_delta_n(pred_depth, gt_depth, nill_mask, 2))
         nill_delta3.append(cal_delta_n(pred_depth, gt_depth, nill_mask, 3))
 
-        # # ill affine
-        # pred_inv_depth_affine = pred_inv_depth[ill_mask]
-        # pred_inv_depth_affine = pred_inv_depth_affine-np.median(pred_inv_depth_affine)
-        # pred_inv_depth_affine = pred_inv_depth_affine/np.mean(np.abs(pred_inv_depth_affine))
-        # pred_inv_depth_affine = (pred_inv_depth_affine-np.min(pred_inv_depth_affine))/(np.max(pred_inv_depth_affine)-np.min(pred_inv_depth_affine))
+        # # # affine inverse depth
+        pred_inv_depth_affine = pred_inv_depth_raw
+        if not args.scale_align:
+            pred_inv_depth_affine = pred_inv_depth_affine-np.median(pred_inv_depth_affine[valid_mask])
+        pred_inv_depth_affine = pred_inv_depth_affine/np.mean(np.abs(pred_inv_depth_affine[valid_mask]))
+        pred_inv_depth_affine = (pred_inv_depth_affine-np.min(pred_inv_depth_affine[valid_mask]))/(np.max(pred_inv_depth_affine[valid_mask])-np.min(pred_inv_depth_affine[valid_mask])) # 0~1
 
-        # gt_inv_depth_affine = (1/gt_depth)[ill_mask]
-        # gt_inv_depth_affine = gt_inv_depth_affine-np.median(gt_inv_depth_affine)
-        # gt_inv_depth_affine = gt_inv_depth_affine/np.mean(np.abs(gt_inv_depth_affine))
-        # gt_inv_depth_affine = (gt_inv_depth_affine-np.min(gt_inv_depth_affine))/(np.max(gt_inv_depth_affine)-np.min(gt_inv_depth_affine))
+        gt_inv_depth_affine = gt_inv_depth_raw
+        if not args.scale_align:
+            gt_inv_depth_affine = gt_inv_depth_affine-np.median(gt_inv_depth_affine[valid_mask])
+        gt_inv_depth_affine = gt_inv_depth_affine/np.mean(np.abs(gt_inv_depth_affine[valid_mask]))
+        gt_inv_depth_affine = (gt_inv_depth_affine-np.min(gt_inv_depth_affine[valid_mask]))/(np.max(gt_inv_depth_affine[valid_mask])-np.min(gt_inv_depth_affine[valid_mask])) # 0~1
 
-        # new_ill_mask = (gt_inv_depth_affine>0) & (pred_inv_depth_affine>0)
-        # ill_abs_rel_affine.append(cal_abs_rel_metric(pred_inv_depth_affine, gt_inv_depth_affine, new_ill_mask))
-        # ill_rms_affine.append(cal_depth_rms(pred_inv_depth_affine, gt_inv_depth_affine, new_ill_mask))
-        # ill_log10_affine.append(cal_depth_log10(pred_inv_depth_affine, gt_inv_depth_affine, new_ill_mask))
-        # ill_delta1_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, new_ill_mask, 1))
-        # ill_delta2_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, new_ill_mask, 2))
-        # ill_delta3_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, new_ill_mask, 3))
+        # # # affine depth
+        pred_depth_affine = pred_depth_raw       
+        if not args.scale_align:
+            pred_depth_affine = pred_depth_affine-np.median(pred_depth_affine[valid_mask])
+        pred_depth_affine = pred_depth_affine/np.mean(np.abs(pred_depth_affine[valid_mask]))
+        pred_depth_affine = (pred_depth_affine-np.min(pred_depth_affine[valid_mask]))/(np.max(pred_depth_affine[valid_mask])-np.min(pred_depth_affine[valid_mask])) # 0~1
+        
+        gt_depth_affine = gt_depth_raw
+        if not args.scale_align:
+            gt_depth_affine = gt_depth_affine-np.median(gt_depth_affine[valid_mask])
+        gt_depth_affine = gt_depth_affine/np.mean(np.abs(gt_depth_affine[valid_mask]))
+        gt_depth_affine = (gt_depth_affine-np.min(gt_depth_affine[valid_mask]))/(np.max(gt_depth_affine[valid_mask])-np.min(gt_depth_affine[valid_mask])) # 0~1        
+        
+        # depth affine
+        # depth_affine_valid = valid_mask & (gt_depth_affine>0)
+        abs_rel_depth_affine.append(cal_abs_rel_metric(pred_depth_affine, gt_depth_affine, valid_mask))
+        rms_depth_affine.append(cal_depth_rms(pred_depth_affine, gt_depth_affine, valid_mask))
+        log10_depth_affine.append(cal_depth_log10(pred_depth_affine, gt_depth_affine, valid_mask))
+        delta1_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, valid_mask, 1))
+        delta2_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, valid_mask, 2))
+        delta3_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, valid_mask, 3))
+
+        ill_abs_rel_depth_affine.append(cal_abs_rel_metric(pred_depth_affine, gt_depth_affine, ill_mask))
+        ill_rms_depth_affine.append(cal_depth_rms(pred_depth_affine, gt_depth_affine, ill_mask))
+        ill_log10_depth_affine.append(cal_depth_log10(pred_depth_affine, gt_depth_affine, ill_mask))
+        ill_delta1_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, ill_mask, 1))
+        ill_delta2_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, ill_mask, 2))
+        ill_delta3_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, ill_mask, 3))
+        
+        nill_abs_rel_depth_affine.append(cal_abs_rel_metric(pred_depth_affine, gt_depth_affine, nill_mask))
+        nill_rms_depth_affine.append(cal_depth_rms(pred_depth_affine, gt_depth_affine, nill_mask))
+        nill_log10_depth_affine.append(cal_depth_log10(pred_depth_affine, gt_depth_affine, nill_mask))
+        nill_delta1_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, nill_mask, 1))
+        nill_delta2_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, nill_mask, 2))
+        nill_delta3_depth_affine.append(cal_delta_n(pred_depth_affine, gt_depth_affine, nill_mask, 3))
+
+        # inverse depth affine
+        abs_rel_inv_depth_affine.append(cal_abs_rel_metric(pred_inv_depth_affine, gt_inv_depth_affine, valid_mask))
+        rms_inv_depth_affine.append(cal_depth_rms(pred_inv_depth_affine, gt_inv_depth_affine, valid_mask))
+        log10_inv_depth_affine.append(cal_depth_log10(pred_inv_depth_affine, gt_inv_depth_affine, valid_mask))
+        delta1_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, valid_mask, 1))
+        delta2_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, valid_mask, 2))
+        delta3_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, valid_mask, 3))
+
+        ill_abs_rel_inv_depth_affine.append(cal_abs_rel_metric(pred_inv_depth_affine, gt_inv_depth_affine, ill_mask))
+        ill_rms_inv_depth_affine.append(cal_depth_rms(pred_inv_depth_affine, gt_inv_depth_affine, ill_mask))
+        ill_log10_inv_depth_affine.append(cal_depth_log10(pred_inv_depth_affine, gt_inv_depth_affine, ill_mask))
+        ill_delta1_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, ill_mask, 1))
+        ill_delta2_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, ill_mask, 2))
+        ill_delta3_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, ill_mask, 3))
+
+        nill_abs_rel_inv_depth_affine.append(cal_abs_rel_metric(pred_inv_depth_affine, gt_inv_depth_affine, nill_mask))
+        nill_rms_inv_depth_affine.append(cal_depth_rms(pred_inv_depth_affine, gt_inv_depth_affine, nill_mask))
+        nill_log10_inv_depth_affine.append(cal_depth_log10(pred_inv_depth_affine, gt_inv_depth_affine, nill_mask))
+        nill_delta1_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, nill_mask, 1))
+        nill_delta2_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, nill_mask, 2))
+        nill_delta3_inv_depth_affine.append(cal_delta_n(pred_inv_depth_affine, gt_inv_depth_affine, nill_mask, 3))
 
 
         file_name = os.path.dirname(pred_file).split('/')[-1]+'/'+os.path.basename(pred_file).split('.')[0]
@@ -579,14 +707,6 @@ if __name__=='__main__':
     print('ill Delta2:', np.mean(ill_delta2))
     print('ill Delta3:', np.mean(ill_delta3))
 
-    # print('#######################')
-    # print('ill AbsRel Affine:', np.mean(ill_abs_rel_affine))
-    # print('ill RMS Affine:', np.mean(ill_rms_affine))
-    # print('ill Log10 Affine:', np.mean(ill_log10_affine))
-    # print('ill Delta1 Affine:', np.mean(ill_delta1_affine))
-    # print('ill Delta2 Affine:', np.mean(ill_delta2_affine))
-    # print('ill Delta3 Affine:', np.mean(ill_delta3_affine))
-
     print('#######################')
     print('nill AbsRel:', np.mean(nill_abs_rel))
     print('nill RMS:', np.mean(nill_rms))
@@ -595,11 +715,56 @@ if __name__=='__main__':
     print('nill Delta2:', np.mean(nill_delta2))
     print('nill Delta3:', np.mean(nill_delta3))
 
+    print('#######################')
+    print('AbsRel depth affine:', np.mean(abs_rel_depth_affine))
+    print('RMS depth affine:', np.mean(rms_depth_affine))
+    print('Log10 depth affine:', np.mean(log10_depth_affine))
+    print('Delta1 depth affine:', np.mean(delta1_depth_affine))
+    print('Delta2 depth affine:', np.mean(delta2_depth_affine))
+    print('Delta3 depth affine:', np.mean(delta3_depth_affine))
+    print('#######################')
+    print('ill AbsRel depth affine:', np.mean(ill_abs_rel_depth_affine))
+    print('ill RMS depth affine:', np.mean(ill_rms_depth_affine))
+    print('ill Log10 depth affine:', np.mean(ill_log10_depth_affine))
+    print('ill Delta1 depth affine:', np.mean(ill_delta1_depth_affine))
+    print('ill Delta2 depth affine:', np.mean(ill_delta2_depth_affine))
+    print('ill Delta3 depth affine:', np.mean(ill_delta3_depth_affine))
+    print('#######################')
+    print('nill AbsRel depth affine:', np.mean(nill_abs_rel_depth_affine))
+    print('nill RMS depth affine:', np.mean(nill_rms_depth_affine))
+    print('nill Log10 depth affine:', np.mean(nill_log10_depth_affine))
+    print('nill Delta1 depth affine:', np.mean(nill_delta1_depth_affine))
+    print('nill Delta2 depth affine:', np.mean(nill_delta2_depth_affine))
+    print('nill Delta3 depth affine:', np.mean(nill_delta3_depth_affine))
+    print('#######################')
+    print('AbsRel inv depth affine:', np.mean(abs_rel_inv_depth_affine))
+    print('RMS inv depth affine:', np.mean(rms_inv_depth_affine))
+    print('Log10 inv depth affine:', np.mean(log10_inv_depth_affine))
+    print('Delta1 inv depth affine:', np.mean(delta1_inv_depth_affine))
+    print('Delta2 inv depth affine:', np.mean(delta2_inv_depth_affine))
+    print('Delta3 inv depth affine:', np.mean(delta3_inv_depth_affine))
+    print('#######################')
+    print('ill AbsRel inv depth affine:', np.mean(ill_abs_rel_inv_depth_affine))
+    print('ill RMS inv depth affine:', np.mean(ill_rms_inv_depth_affine))
+    print('ill Log10 inv depth affine:', np.mean(ill_log10_inv_depth_affine))
+    print('ill Delta1 inv depth affine:', np.mean(ill_delta1_inv_depth_affine))
+    print('ill Delta2 inv depth affine:', np.mean(ill_delta2_inv_depth_affine))
+    print('ill Delta3 inv depth affine:', np.mean(ill_delta3_inv_depth_affine))
+    print('#######################')
+    print('nill AbsRel inv depth affine:', np.mean(nill_abs_rel_inv_depth_affine))
+    print('nill RMS inv depth affine:', np.mean(nill_rms_inv_depth_affine))
+    print('nill Log10 inv depth affine:', np.mean(nill_log10_inv_depth_affine))
+    print('nill Delta1 inv depth affine:', np.mean(nill_delta1_inv_depth_affine))
+    print('nill Delta2 inv depth affine:', np.mean(nill_delta2_inv_depth_affine))
+    print('nill Delta3 inv depth affine:', np.mean(nill_delta3_inv_depth_affine))
+    print('#######################')
+
+
     stats['mean_metric_summary'] = {metric:eval('np.mean('+metric+').item()') for metric in metric_list}
 
     # save stats
     import json
-    with open(os.path.join(args.output_path.replace('/pcd',''), 'stats.json'), 'w') as f:
+    with open(os.path.join(args.output_path.replace('/pcd',''), 'stats_metric&affine.json'), 'w') as f:
         json.dump(stats, f, indent=4)
     
 
