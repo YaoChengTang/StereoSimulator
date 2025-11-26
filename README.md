@@ -101,4 +101,4 @@ bash eval.sh
 # export output_path=/data3/jiaxi/workspace_bak/workspace/StereoSimulator/eval_data_fooling3d1
 ```
 
-You need to place the results of the method you want to compare in the specified pred_path directory beforehand. You can also choose the pred_type and the alignment strategy between the ground truth and the predicted results.
+You need to place the results of the method you want to compare in the specified ``pred_path`` directory beforehand. You can also choose the ``pred_type`` and the alignment strategy between the ground truth and the predicted results.
