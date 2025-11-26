@@ -86,3 +86,19 @@ python right_image_generation.py
 #meta_root  = "/data2/Fooling3D/meta_data"
 #log_root   = "/data5/yao/runs/log"
 ```
+
+## 3DVisualIllusion Evaluation Scripts
+We provide a script to evaluate both disparity from stereo-matching methods and depth from monocular methods.
+
+```shell
+cd illusion_eval
+bash eval.sh
+
+# Modify the following paths as needed:
+# export data_path=/data2/Fooling3D/real/test/left
+# export gt_path=/data2/Fooling3D/real/test/disp
+# export pred_path=/data3/jiaxi/workspace_bak/workspace/StereoSimulator/eval_data_fooling3d
+# export output_path=/data3/jiaxi/workspace_bak/workspace/StereoSimulator/eval_data_fooling3d1
+```
+
+You need to place the results of the method you want to compare in the specified pred_path directory beforehand. You can also choose the pred_type and the alignment strategy between the ground truth and the predicted results.
